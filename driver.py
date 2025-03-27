@@ -27,7 +27,7 @@ class Driver(object):
         self.control = carControl.CarControl()
         
         self.steer_lock = 0.785398
-        self.max_speed = 200
+        self.max_speed = 180
         self.prev_rpm = None
 
         self.manual_mode = manual_mode
@@ -78,9 +78,9 @@ class Driver(object):
         
         # Steering control
         if keyboard.is_pressed('right'):
-            self.control.setSteer(-1.0)  # Full left
+            self.control.setSteer(-0.75)  # Full left
         elif keyboard.is_pressed('left'):
-            self.control.setSteer(1.0)   # Full right
+            self.control.setSteer(0.75)   # Full right
         else:
             self.control.setSteer(0)     # No steering
 
