@@ -72,37 +72,65 @@ class Driver(object):
         return self.control.toMsg()
     
     def manual_control(self):
-        '''Manual control method using keyboard input with speed limiting'''
+        '''Manual control with automatic gear shifting'''
         current_speed = self.state.getSpeedX()
         current_gear = self.state.getGear()
         
-        # Steering
+        # Steering control
         if keyboard.is_pressed('right'):
-            self.control.setSteer(-1.0)  
+            self.control.setSteer(-1.0)  # Full left
         elif keyboard.is_pressed('left'):
-            self.control.setSteer(1.0)   
+            self.control.setSteer(1.0)   # Full right
         else:
-            self.control.setSteer(0)    
-        
-        # Acceleration/Braking with speed limiting
+            self.control.setSteer(0)     # No steering
+
+        # Acceleration / Braking / Reversing
         if keyboard.is_pressed('up'):
-            if current_speed < self.max_speed:
-                self.control.setAccel(1.0)  
-            else:
-                self.control.setAccel(0)     
+            if current_gear == -1:
+                # If in reverse, switch to 1st gear before accelerating
+                self.control.setGear(1)
+
+            self.control.setAccel(1.0 if current_speed < self.max_speed else 0)
             self.control.setBrake(0)
+
         elif keyboard.is_pressed('down'):
-            if current_speed > 0:
+            if current_speed > 1.0:  
+                # If moving forward, apply brakes
                 self.control.setAccel(0)
-                self.control.setBrake(1.0)  
+                self.control.setBrake(1.0)
             else:
-                self.control.setAccel(1.0)  
+                # If stopped or moving backward, switch to reverse
+                self.control.setGear(-1)
+                self.control.setAccel(1.0)
                 self.control.setBrake(0)
+
         else:
             self.control.setAccel(0)
             self.control.setBrake(0)
-        
+
         self.gear()
+
+    def gear(self):
+        '''Automatic gear shifting logic'''
+        rpm = self.state.getRpm()
+        gear = self.state.getGear()
+
+        if gear == -1:
+            return  # Skip gear shifting in reverse
+
+        if rpm > 7000 and gear < 6:
+            # Upshift if RPM is high
+            self.control.setGear(gear + 1)
+
+        elif rpm < 3000 and gear > 1:
+            # Downshift if RPM is low and car is slowing
+            self.control.setGear(gear - 1)
+
+        # Ensure first gear is engaged if the car is nearly stopped
+        if abs(self.state.getSpeedX()) < 1.0 and gear > 1:
+            self.control.setGear(1)
+
+
     
     def autonomous_control(self):
         '''Original autonomous control methods'''
@@ -136,25 +164,25 @@ class Driver(object):
         
         self.control.setSteer((angle - dist*0.5)/self.steer_lock)
     
-    def gear(self):
-        rpm = self.state.getRpm()
-        gear = self.state.getGear()
+    # def gear(self):
+    #     rpm = self.state.getRpm()
+    #     gear = self.state.getGear()
         
-        if self.prev_rpm == None:
-            up = True
-        else:
-            if (self.prev_rpm - rpm) < 0:
-                up = True
-            else:
-                up = False
+    #     if self.prev_rpm == None:
+    #         up = True
+    #     else:
+    #         if (self.prev_rpm - rpm) < 0:
+    #             up = True
+    #         else:
+    #             up = False
         
-        if up and rpm > 7000:
-            gear += 1
+    #     if up and rpm > 7000:
+    #         gear += 1
         
-        if not up and rpm < 3000:
-            gear -= 1
+    #     if not up and rpm < 3000:
+    #         gear -= 1
         
-        self.control.setGear(gear)
+    #     self.control.setGear(gear)
     
     def speed(self):
         speed = self.state.getSpeedX()
