@@ -26,6 +26,7 @@ parser.add_argument('--stage', action='store', dest='stage', type=int, default=2
 parser.add_argument('--manual', action='store_true', dest='manual_mode',
                     help='Enable manual control mode')
 
+
 arguments = parser.parse_args()
 
 # Print summary
