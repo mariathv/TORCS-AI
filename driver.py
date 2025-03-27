@@ -5,21 +5,20 @@ import csv
 import os
 from datetime import datetime
 import keyboard  
+from telemetryLogger import TelemetryLogger
 
 class Driver(object):
     '''
     A driver object for the SCRC with manual control and telemetry logging
     '''
 
-    def __init__(self, stage, manual_mode=False):
+    def __init__(self, stage, manual_mode=False, max_episodes=1):
         '''Constructor'''
         self.WARM_UP = 0
         self.QUALIFYING = 1
         self.RACE = 2
         self.UNKNOWN = 3
         self.stage = stage
-
-        
         
         self.parser = msgParser.MsgParser()
         
@@ -28,37 +27,20 @@ class Driver(object):
         self.control = carControl.CarControl()
         
         self.steer_lock = 0.785398
-        self.max_speed = 150
+        self.max_speed = 200
         self.prev_rpm = None
 
         self.manual_mode = manual_mode
         
-        # -------------------------- TELEMETERY LOGGING ----------------------------- # 
-        self.telemetry_dir = 'telemetry_logs'
-        os.makedirs(self.telemetry_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.telemetry_file = os.path.join(self.telemetry_dir, f'telemetry_{timestamp}.csv')
-        
-        self.telemetry_file_handle = open(self.telemetry_file, 'w', newline='')
-        self.telemetry_writer = csv.writer(self.telemetry_file_handle)
-        
-        headers = [
-            'angle', 'curLapTime', 'damage', 'distFromStart', 'distRaced', 
-            'fuel', 'gear', 'lastLapTime', 'racePos', 'rpm', 
-            'speedX', 'speedY', 'speedZ', 'trackPos', 'z',
-            'accel', 'brake', 'steer', 'clutch'
-        ]
-        
-        headers.extend([f'track_{i}' for i in range(19)])
-        headers.extend([f'wheelSpinVel_{i}' for i in range(4)])
-        
-        self.telemetry_writer.writerow(headers)
+        self.telemetry_logger = TelemetryLogger(
+            stage=stage, 
+            max_episodes=max_episodes
+        )
     
     def __del__(self):
-        '''Destructor to ensure file is closed'''
-        if hasattr(self, 'telemetry_file_handle'):
-            self.telemetry_file_handle.close()
+        '''Destructor to close telemetry logger'''
+        if hasattr(self, 'telemetry_logger'):
+            self.telemetry_logger.close()
     
     def init(self):
         '''Return init string with rangefinder angles'''
@@ -76,48 +58,51 @@ class Driver(object):
     
     def drive(self, msg):
         self.state.setFromMsg(msg)
-        
+    
         if self.manual_mode:
             self.manual_control()
         else:
             self.autonomous_control()
         
-        # Log telemetry data
-        self._log_telemetry()
+        # Always apply gear shifting logic (works for both modes)
+        self.gear()
+        
+        self.telemetry_logger.log_data(self.state, self.control)
         
         return self.control.toMsg()
     
     def manual_control(self):
-        '''Manual control method using keyboard input'''
+        '''Manual control method using keyboard input with speed limiting'''
+        current_speed = self.state.getSpeedX()
+        current_gear = self.state.getGear()
+        
         # Steering
         if keyboard.is_pressed('right'):
-            self.control.setSteer(-1.0)  # Full left
+            self.control.setSteer(-1.0)  
         elif keyboard.is_pressed('left'):
-            self.control.setSteer(1.0)   # Full right
+            self.control.setSteer(1.0)   
         else:
-            self.control.setSteer(0)     # No steering
+            self.control.setSteer(0)    
         
+        # Acceleration/Braking with speed limiting
         if keyboard.is_pressed('up'):
-            self.control.setAccel(1.0)   # Full acceleration
-            self.control.setBrake(0)     # No braking
-            self.control.setGear(1)      # Ensure forward gear
-        elif keyboard.is_pressed('down'):
-            current_speed = self.state.getSpeedX()
-            current_gear = self.state.getGear()
-            
-            if current_speed <= 0 and current_gear > 0:
-                self.control.setAccel(0)
-                self.control.setBrake(1.0)
-                self.control.setGear(-1)  # Shift to reverse
-            elif current_gear == -1:
-                self.control.setAccel(1.0)
-                self.control.setBrake(0)
+            if current_speed < self.max_speed:
+                self.control.setAccel(1.0)  
             else:
+                self.control.setAccel(0)     
+            self.control.setBrake(0)
+        elif keyboard.is_pressed('down'):
+            if current_speed > 0:
                 self.control.setAccel(0)
-                self.control.setBrake(1.0)
+                self.control.setBrake(1.0)  
+            else:
+                self.control.setAccel(1.0)  
+                self.control.setBrake(0)
         else:
-            self.control.setAccel(0)     # No acceleration
-            self.control.setBrake(0)     # No braking
+            self.control.setAccel(0)
+            self.control.setBrake(0)
+        
+        self.gear()
     
     def autonomous_control(self):
         '''Original autonomous control methods'''
@@ -153,35 +138,23 @@ class Driver(object):
     
     def gear(self):
         rpm = self.state.getRpm()
-        current_gear = self.state.getGear()
-        speed = self.state.getSpeedX()
+        gear = self.state.getGear()
         
-        if current_gear == 1:
-            if speed > 30 or rpm > 5000:
-                print("change gear > 2")
-                current_gear = 2
-        elif current_gear == 2:
-            if speed > 60 or rpm > 6500:
-                current_gear = 3
-        elif current_gear == 3:
-            if speed > 90 or rpm > 7000:
-                current_gear = 4
-        elif current_gear == 4:
-            if speed > 120 or rpm > 7500:
-                current_gear = 5
-        elif current_gear == 5:
-            if speed > 150 or rpm > 7800:
-                current_gear = 6
+        if self.prev_rpm == None:
+            up = True
+        else:
+            if (self.prev_rpm - rpm) < 0:
+                up = True
+            else:
+                up = False
         
-        if current_gear > 1:
-            if rpm < 3000:
-                current_gear -= 1
+        if up and rpm > 7000:
+            gear += 1
         
-        current_gear = max(1, min(current_gear, 6))
+        if not up and rpm < 3000:
+            gear -= 1
         
-        self.control.setGear(current_gear)
-        
-        self.prev_rpm = rpm
+        self.control.setGear(gear)
     
     def speed(self):
         speed = self.state.getSpeedX()
@@ -221,10 +194,10 @@ class Driver(object):
             self.control.setGear(current_gear - 1)
             
     def onShutDown(self):
-        '''Close telemetry file on shutdown'''
-        if hasattr(self, 'telemetry_file_handle'):
-            self.telemetry_file_handle.close()
-        print(f"Telemetry data saved to {self.telemetry_file}")
+        '''Close telemetry logger on shutdown'''
+        self.telemetry_logger.close()
+        print(f"Telemetry data saved to telemetry_logs/persistent_telemetry.csv")
     
     def onRestart(self):
-        pass
+        '''Start a new episode in the telemetry logger'''
+        self.telemetry_logger.start_new_episode()

@@ -21,7 +21,7 @@ parser.add_argument('--maxSteps', action='store', dest='max_steps', type=int, de
                     help='Maximum number of steps (default: 0)')
 parser.add_argument('--track', action='store', dest='track', default=None,
                     help='Name of the track')
-parser.add_argument('--stage', action='store', dest='stage', type=int, default=3,
+parser.add_argument('--stage', action='store', dest='stage', type=int, default=2,
                     help='Stage (0 - Warm-Up, 1 - Qualifying, 2 - Race, 3 - Unknown)')
 parser.add_argument('--manual', action='store_true', dest='manual_mode',
                     help='Enable manual control mode')
