@@ -1,1 +1,6 @@
 keyboard
+pandas
+numpy
+scikit-learn
+tensorflow
+matplotlib
