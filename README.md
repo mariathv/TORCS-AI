@@ -72,6 +72,7 @@ https://www.python.org/downloads/release/python-31010/
 ```bash
 pip install virtualenv
 virtualenv -p python3.10 venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
