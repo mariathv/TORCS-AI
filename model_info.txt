@@ -1,0 +1,6 @@
+Feature count: 12
+Using reduced feature set (12 features) for better performance
+- Speed components (3): speedX, speedY, speedZ
+- Position data (2): angle, trackPos
+- Engine state (2): rpm, gear
+- Track sensors (5): front, front-left, front-right

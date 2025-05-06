@@ -3,15 +3,53 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-def load_and_preprocess_data(csv_file):
+def load_and_preprocess_data(csv_file, return_scaler=False):
     # ---- load telemetry data
     print("Loading data...")
     data = pd.read_csv(csv_file)
     print(f"Data shape: {data.shape}")
 
-    # --- define input (sensors) and output (actions) columns
-    input_cols = ['speedX', 'speedY', 'speedZ', 'angle', 'trackPos', 'accel']
+    # --- define input (sensors) and output (actions) columns - REDUCED FEATURE SET
+    input_cols = [
+        'speedX', 'speedY', 'speedZ',       # Speed components (3)
+        'angle', 'trackPos',                # Position on track (2)
+        'rpm', 'gear'                       # Engine state (2)
+    ]
+    
+    # Add specific track sensors (only 5 most important ones)
+    # These correspond to sensors directly in front and at angles to front-left and front-right
+    track_indices = [7, 8, 9, 10, 11]  # These are the most important ones for navigation
+    
+    # Try both naming conventions for track sensors
+    track_cols_format1 = [f'track_{i}' for i in track_indices]  # track_7, track_8, etc.
+    track_cols_format2 = [f'track[{i}]' for i in track_indices]  # track[7], track[8], etc.
+    
+    # Check which format exists in the dataset
+    if any(col in data.columns for col in track_cols_format1):
+        track_cols = [col for col in track_cols_format1 if col in data.columns]
+    elif any(col in data.columns for col in track_cols_format2):
+        track_cols = [col for col in track_cols_format2 if col in data.columns]
+    else:
+        print("WARNING: Track sensor columns not found in expected format.")
+        track_cols = []
+    
+    # Add available track columns to inputs
+    input_cols.extend(track_cols)
+    
+    # Output columns remain the same
     output_cols = ['steer', 'brake', 'accel']
+
+    # Check if columns exist in the dataset
+    for col in input_cols + output_cols:
+        if col not in data.columns:
+            print(f"Warning: Column {col} not found in dataset.")
+
+    # Filter to only include columns that exist in the dataset
+    input_cols = [col for col in input_cols if col in data.columns]
+    output_cols = [col for col in output_cols if col in data.columns]
+
+    print(f"Using REDUCED input columns ({len(input_cols)} features): {input_cols}")
+    print(f"Using output columns: {output_cols}")
 
     # --- inputs and outputs
     X = data[input_cols].values
@@ -31,7 +69,10 @@ def load_and_preprocess_data(csv_file):
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    print("Preprocessing done.")
+    print("Preprocessing done with REDUCED feature set (12 features).")
 
-    return X_train, X_test, y_train, y_test
+    if return_scaler:
+        return X_train, X_test, y_train, y_test, scaler
+    else:
+        return X_train, X_test, y_train, y_test
 

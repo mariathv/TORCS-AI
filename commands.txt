@@ -1,0 +1,3 @@
+venv\Scripts\activate
+python controller/main.py --train --data telemetry_logs/telemetry.csv --save_scaler
+python pyclient.py --model model

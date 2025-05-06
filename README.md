@@ -91,6 +91,23 @@ To run the client in manual mode, use the following command:
 
 `python pyclient.py --manual`
 
+When running in manual mode, you'll be prompted whether to log telemetry data:
+```
+Do you want to log telemetry data? (y/n):
+```
+- Type `y` to enable telemetry logging (saved to a timestamped file in telemetry_logs/)
+- Type `n` to disable telemetry logging
+
+### Training with Manual Mode Data
+
+To train a model using only data collected in manual mode:
+
+```bash
+python controller/main.py --train --data telemetry_logs/manual_telemetry_YYYYMMDD_HHMMSS.csv --save_scaler --manual_mode_only
+```
+
+The `--manual_mode_only` flag ensures only data points marked as collected in manual mode are used for training.
+
 ## Important Notes
 
 Close the telemetry CSV file before running TORCS again!

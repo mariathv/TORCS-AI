@@ -25,6 +25,8 @@ parser.add_argument('--stage', action='store', dest='stage', type=int, default=2
                     help='Stage (0 - Warm-Up, 1 - Qualifying, 2 - Race, 3 - Unknown)')
 parser.add_argument('--manual', action='store_true', dest='manual_mode',
                     help='Enable manual control mode')
+parser.add_argument('--model', action='store', dest='model_path', default='controller/model',
+                    help='Path to the trained ML model (default: controller/model)')
 
 
 arguments = parser.parse_args()
@@ -37,6 +39,8 @@ print('Maximum steps:', arguments.max_steps)
 print('Track:', arguments.track)
 print('Stage:', arguments.stage)
 print('Manual Mode:', arguments.manual_mode)
+if not arguments.manual_mode:
+    print('ML Model:', arguments.model_path)
 print('*********************************************')
 
 try:
@@ -53,8 +57,13 @@ curEpisode = 0
 
 verbose = False
 
-# Pass manual mode flag to Driver constructor
-d = driver.Driver(arguments.stage, manual_mode=arguments.manual_mode)
+# Pass manual mode flag and model path to Driver constructor
+d = driver.Driver(
+    arguments.stage, 
+    manual_mode=arguments.manual_mode,
+    max_episodes=arguments.max_episodes,
+    model_path=arguments.model_path
+)
 
 if arguments.manual_mode:
     print("Manual Control Mode:")
