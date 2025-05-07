@@ -16,13 +16,13 @@ def load_and_preprocess_data(csv_file, return_scaler=False):
         'rpm', 'gear'                       # Engine state (2)
     ]
     
-    # Add specific track sensors (only 5 most important ones)
-    # These correspond to sensors directly in front and at angles to front-left and front-right
-    track_indices = [7, 8, 9, 10, 11]  # These are the most important ones for navigation
+    # Add more track sensors for better coverage
+    # These correspond to sensors in front, sides, and rear of the car
+    track_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]  # Full 180-degree coverage
     
     # Try both naming conventions for track sensors
-    track_cols_format1 = [f'track_{i}' for i in track_indices]  # track_7, track_8, etc.
-    track_cols_format2 = [f'track[{i}]' for i in track_indices]  # track[7], track[8], etc.
+    track_cols_format1 = [f'track_{i}' for i in track_indices]  # track_0, track_1, etc.
+    track_cols_format2 = [f'track[{i}]' for i in track_indices]  # track[0], track[1], etc.
     
     # Check which format exists in the dataset
     if any(col in data.columns for col in track_cols_format1):

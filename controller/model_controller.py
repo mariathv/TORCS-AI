@@ -12,15 +12,15 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 class ModelController:
     """
-    ML-only controller for TORCS with reduced feature set (12 features)
+    ML-only controller for TORCS with full feature set (26 features)
     """
     
     def __init__(self, model_path='controller/model', scaler_path=None):
-        """Initialize the ML-only controller with reduced features"""
-        print("IMPORTANT: ML-ONLY CONTROLLER - Using reduced feature set (12 features)")
+        """Initialize the ML-only controller with full features"""
+        print("IMPORTANT: ML-ONLY CONTROLLER - Using full feature set (26 features)")
         
-        # Feature count reduced for better performance
-        self.FEATURE_COUNT = 12
+        # Feature count for full feature set
+        self.FEATURE_COUNT = 26  # 7 base features + 19 track sensors
         
         # Add .keras extension if needed
         if not model_path.endswith(('.keras', '.h5')):
@@ -68,7 +68,7 @@ class ModelController:
                 print(f"WARNING: Model expects {expected_features} features but we're providing {self.FEATURE_COUNT}")
                 print("You may need to retrain your model with the reduced feature set")
             
-            # Pre-allocate the numpy array for features (using 12 features)
+            # Pre-allocate the numpy array for features (using 26 features)
             self.feature_array = np.zeros((1, self.FEATURE_COUNT), dtype=np.float32)
             
             # Always consider the model loaded
@@ -94,10 +94,10 @@ class ModelController:
             except Exception as e:
                 print(f"Error loading scaler: {e}")
                 
-        print("ML-ONLY controller initialized with 12 features for better performance")
+        print("ML-ONLY controller initialized with 26 features for better performance")
     
     def prepare_input(self, state):
-        """Prepare REDUCED input features (12 total) for the model"""
+        """Prepare FULL input features (26 total) for the model"""
         # Reuse the pre-allocated array
         features = self.feature_array[0]
         
@@ -115,21 +115,20 @@ class ModelController:
         features[5] = state.rpm if hasattr(state, 'rpm') else 0.0
         features[6] = state.gear if hasattr(state, 'gear') else 0.0
         
-        # ----- Track sensors (only 5 most important ones) -----
-        if hasattr(state, 'track') and state.track and len(state.track) >= 9:
-            # Front center sensor (index 9 in original 19-sensor array)
-            features[7] = state.track[9]
-            
-            # Front-left sensors (indices 7-8 in original array)
-            features[8] = state.track[8]
-            features[9] = state.track[7]
-            
-            # Front-right sensors (indices 10-11 in original array)
-            features[10] = state.track[10]
-            features[11] = state.track[11]
+        # ----- Track sensors (all 19 sensors) -----
+        if hasattr(state, 'track') and state.track and len(state.track) >= 19:
+            # Copy all track sensors
+            for i in range(19):
+                if 7 + i < len(features):  # Safety check
+                    features[7 + i] = state.track[i]
+                else:
+                    print(f"WARNING: Skipping track sensor {i} - would exceed feature array size")
         else:
             # Zero out all track sensors if not available
-            features[7:12] = 0.0
+            print("WARNING: Track sensors not available - zeroing out all track sensor values")
+            # Safety check to ensure we don't exceed array bounds
+            end_idx = min(26, len(features))
+            features[7:end_idx] = 0.0
         
         # Apply scaling if available
         X = self.feature_array
@@ -137,6 +136,7 @@ class ModelController:
             try:
                 X = self.scaler.transform(X)
             except Exception as e:
+                print(f"Error during scaling: {e}")
                 # Skip scaling on error
                 pass
         
@@ -172,13 +172,13 @@ class ModelController:
                 accel = 0.5
                 
             # Amplify steering for better response (but keep it pure ML)
-            steer = max(-1.0, min(1.0, steer * 2.0))
+            # steer = max(-1.0, min(1.0, steer * 2.0))
             
             # Log control values occasionally
             current_time = time.time()
             if current_time - self.last_report_time > 5.0:
                 prediction_time = (time.time() - start_time) * 1000  # in ms
-                print(f"ML CONTROL: Using 12 features | Prediction time: {prediction_time:.2f}ms")
+                print(f"ML CONTROL: Using 26 features | Prediction time: {prediction_time:.2f}ms")
                 print(f"ML VALUES: steer={steer:.2f}, accel={accel:.2f}, brake={brake:.2f}")
                 self.last_report_time = current_time
                 

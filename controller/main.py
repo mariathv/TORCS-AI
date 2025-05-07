@@ -23,8 +23,8 @@ def main():
     
     if args.train:
         print("=" * 50)
-        print("TRAINING ML MODEL WITH REDUCED FEATURE SET (12 FEATURES)")
-        print("This improves performance while maintaining control quality")
+        print("TRAINING ML MODEL WITH FULL FEATURE SET (24 FEATURES)")
+        print("This provides better control quality with full track sensor coverage")
         print("=" * 50)
         
         print(f"Loading data from {args.data}")
@@ -64,11 +64,11 @@ def main():
             info_path = f"{base_path}_info.txt"
             with open(info_path, 'w') as f:
                 f.write(f"Feature count: {X_train.shape[1]}\n")
-                f.write("Using reduced feature set (12 features) for better performance\n")
+                f.write("Using full feature set (24 features) for better control quality\n")
                 f.write("- Speed components (3): speedX, speedY, speedZ\n")
                 f.write("- Position data (2): angle, trackPos\n")
                 f.write("- Engine state (2): rpm, gear\n")
-                f.write("- Track sensors (5): front, front-left, front-right\n")
+                f.write("- Track sensors (19): full 180-degree coverage around the car\n")
             print(f"Model info saved to {info_path}")
     else:
         # Just load the model to verify it exists
@@ -78,10 +78,10 @@ def main():
             print("Model loaded successfully. Ready for inference.")
             print(f"Model input shape: {model.input_shape}")
             
-            if model.input_shape[1] == 12:
-                print("USING OPTIMIZED MODEL with 12 features (should be faster)")
+            if model.input_shape[1] == 24:
+                print("USING FULL MODEL with 24 features (better control quality)")
             else:
-                print(f"NOTE: Model uses {model.input_shape[1]} features (not the optimized 12)")
+                print(f"NOTE: Model uses {model.input_shape[1]} features (not the full 24)")
             print("=" * 50)
 
 if __name__ == "__main__":
