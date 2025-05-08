@@ -1,0 +1,42 @@
+================================================================================
+TORCS ML CONTROLLER EVALUATION REPORT
+================================================================================
+
+Model: ../model
+Data: ../telemetry_logs/telemetry.csv
+Feature count: 26
+Test samples: 18425
+
+PERFORMANCE METRICS:
+--------------------------------------------------
+Overall MSE: 0.037417
+Overall MAE: 0.099569
+
+PER-OUTPUT METRICS:
+Steering:
+  MSE: 0.052554
+  MAE: 0.137154
+  R²: 0.744193
+
+Braking:
+  MSE: 0.006504
+  MAE: 0.022295
+  R²: 0.532456
+
+Acceleration:
+  MSE: 0.053192
+  MAE: 0.139258
+  R²: 0.771938
+
+
+EVALUATION SUMMARY:
+--------------------------------------------------
+Steering prediction quality: Good (R² = 0.7442)
+Braking prediction quality: Fair (R² = 0.5325)
+Acceleration prediction quality: Good (R² = 0.7719)
+
+Generated visualizations:
+- Scatter plot: prediction_scatter.png
+- Error distribution: error_distribution.png
+- Prediction sequence: prediction_sequence.png
+- Feature importance: feature_importance.png
