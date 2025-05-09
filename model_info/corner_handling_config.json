@@ -1,0 +1,9 @@
+{
+    "model_name": "corner_handling",
+    "input_shape": [
+        10,
+        13
+    ],
+    "output_shape": 2,
+    "total_params": 33506
+}

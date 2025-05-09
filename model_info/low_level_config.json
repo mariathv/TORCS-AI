@@ -1,0 +1,9 @@
+{
+    "model_name": "low_level",
+    "input_shape": [
+        10,
+        19
+    ],
+    "output_shape": 4,
+    "total_params": 57828
+}

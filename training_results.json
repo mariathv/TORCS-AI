@@ -1,0 +1,32 @@
+{
+    "high_level": {
+        "final_train_loss": 0.0014370587887242436,
+        "final_val_loss": 0.009698674082756042,
+        "final_train_mae": 0.02263580448925495,
+        "final_val_mae": 0.07076635956764221
+    },
+    "tactical": {
+        "final_train_loss": 0.0006737563526257873,
+        "final_val_loss": 0.0007332855020649731,
+        "final_train_mae": 0.009717701934278011,
+        "final_val_mae": 0.011172229424118996
+    },
+    "low_level": {
+        "final_train_loss": 0.3500615358352661,
+        "final_val_loss": 0.39629065990448,
+        "final_train_mae": 0.1742965430021286,
+        "final_val_mae": 0.1851758509874344
+    },
+    "gear_selection": {
+        "final_train_loss": 2.0021345615386963,
+        "final_val_loss": 1.991464614868164,
+        "final_train_mae": 1.0529742240905762,
+        "final_val_mae": 1.047987461090088
+    },
+    "corner_handling": {
+        "final_train_loss": 0.6542606949806213,
+        "final_val_loss": 0.7128067016601562,
+        "final_train_mae": 0.26694169640541077,
+        "final_val_mae": 0.2775893211364746
+    }
+}

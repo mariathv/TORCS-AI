@@ -1,0 +1,9 @@
+{
+    "model_name": "tactical",
+    "input_shape": [
+        10,
+        15
+    ],
+    "output_shape": 1,
+    "total_params": 47457
+}

@@ -2,6 +2,8 @@ import sys
 import argparse
 import socket
 import driver
+from model_coordinator import ModelCoordinator
+import numpy as np
 
 if __name__ == '__main__':
     pass
@@ -25,9 +27,10 @@ parser.add_argument('--stage', action='store', dest='stage', type=int, default=2
                     help='Stage (0 - Warm-Up, 1 - Qualifying, 2 - Race, 3 - Unknown)')
 parser.add_argument('--manual', action='store_true', dest='manual_mode',
                     help='Enable manual control mode')
-parser.add_argument('--model', action='store', dest='model_path', default='controller/model',
-                    help='Path to the trained ML model (default: controller/model)')
-
+parser.add_argument('--models_dir', action='store', dest='models_dir', default='models',
+                    help='Directory containing trained models (default: models)')
+parser.add_argument('--scalers_dir', action='store', dest='scalers_dir', default='model_scalers',
+                    help='Directory containing model scalers (default: model_scalers)')
 
 arguments = parser.parse_args()
 
@@ -40,7 +43,8 @@ print('Track:', arguments.track)
 print('Stage:', arguments.stage)
 print('Manual Mode:', arguments.manual_mode)
 if not arguments.manual_mode:
-    print('ML Model:', arguments.model_path)
+    print('Models Directory:', arguments.models_dir)
+    print('Scalers Directory:', arguments.scalers_dir)
 print('*********************************************')
 
 try:
@@ -57,12 +61,25 @@ curEpisode = 0
 
 verbose = False
 
-# Pass manual mode flag and model path to Driver constructor
+# Initialize ModelCoordinator if not in manual mode
+model_coordinator = None
+if not arguments.manual_mode:
+    try:
+        model_coordinator = ModelCoordinator(
+            models_dir=arguments.models_dir,
+            scalers_dir=arguments.scalers_dir
+        )
+        print("Successfully loaded all models and scalers")
+    except Exception as e:
+        print(f"Error loading models: {e}")
+        sys.exit(-1)
+
+# Pass manual mode flag and model coordinator to Driver constructor
 d = driver.Driver(
     arguments.stage, 
     manual_mode=arguments.manual_mode,
     max_episodes=arguments.max_episodes,
-    model_path=arguments.model_path
+    model_coordinator=model_coordinator
 )
 
 if arguments.manual_mode:

@@ -1,0 +1,9 @@
+{
+    "model_name": "gear_selection",
+    "input_shape": [
+        10,
+        13
+    ],
+    "output_shape": 1,
+    "total_params": 3009
+}

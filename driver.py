@@ -7,6 +7,8 @@ from datetime import datetime
 import keyboard  
 from telemetryLogger import TelemetryLogger
 import time
+import math
+import numpy as np
 
 # Import ML model controller if available (don't fail if not available)
 try:
@@ -21,7 +23,7 @@ class Driver(object):
     A driver object for the SCRC with manual control and telemetry logging
     '''
 
-    def __init__(self, stage, manual_mode=False, max_episodes=1, model_path=None):
+    def __init__(self, stage, manual_mode=False, max_episodes=1, model_coordinator=None):
         '''Constructor'''
         self.WARM_UP = 0
         self.QUALIFYING = 1
@@ -40,6 +42,8 @@ class Driver(object):
         self.prev_rpm = None
 
         self.manual_mode = manual_mode
+        self.max_episodes = max_episodes
+        self.model_coordinator = model_coordinator
         
         # Initialize telemetry logger
         self.telemetry_logger = TelemetryLogger(
@@ -61,13 +65,13 @@ class Driver(object):
         
         if ML_CONTROLLER_AVAILABLE and not manual_mode:
             # Default to controller/model if not specified
-            if model_path is None:
-                model_path = 'controller/model'
+            if model_coordinator is None:
+                model_coordinator = 'controller/model'
             
             try:
                 # Create the main ML controller
-                self.ml_controller = ModelController(model_path=model_path)
-                print(f"ML Controller initialized with model: {model_path}")
+                self.ml_controller = ModelController(model_path=model_coordinator)
+                print(f"ML Controller initialized with model: {model_coordinator}")
                 
                 # Also create a simple rule controller as a backup only for emergencies
                 self.rule_controller = SimpleRuleController()
@@ -99,6 +103,8 @@ class Driver(object):
         for i in range(5, 9):
             self.angles[i] = -20 + (i-5) * 5
             self.angles[18 - i] = 20 - (i-5) * 5
+        
+        self.angles[9] = 0
         
         return self.parser.stringify({'init': self.angles})
     
@@ -281,41 +287,45 @@ class Driver(object):
             self.control.setGear(1)
     
     def autonomous_control(self, time_limit=None):
-        '''Always use ML model for control (as required)'''
-        if self.ml_controller:
-            try:
-                # Use ML model to predict control actions with time limit
-                predictions = self.ml_controller.predict(
-                    self.state, 
-                    self.control,
-                    time_limit=time_limit
-                )
+        '''Use ModelCoordinator for autonomous control'''
+        try:
+            # Prepare state data for the model
+            state_data = {
+                'angle': self.state.angle,
+                'trackPos': self.state.trackPos,
+                'speedX': self.state.speedX,
+                'speedY': self.state.speedY,
+                'speedZ': self.state.speedZ,
+                'rpm': self.state.rpm,
+                'gear': self.state.gear,
+                'track': self.state.track,  # The track array contains both track and track edge data
+                # No need for trackEdge as ModelCoordinator extracts it from track data
+                'focus': self.state.focus,
+                'fuel': self.state.fuel,
+                'distRaced': self.state.distRaced,
+                'distFromStart': self.state.distFromStart,
+                'racePos': self.state.racePos,
+                'z': self.state.z
+                # Remove attributes that don't exist in CarState: roll, pitch, yaw, etc.
+            }
+            
+            # Get control actions from model coordinator
+            if self.model_coordinator:
+                controls = self.model_coordinator.get_control_actions(state_data)
                 
-                # Apply the predicted controls
-                self.control.setSteer(predictions['steer'])
-                self.control.setAccel(predictions['accel'])
-                self.control.setBrake(predictions['brake'])
+                # Apply the control actions
+                self.control.setSteer(controls['steer'])
+                self.control.setAccel(controls['accel'])
+                self.control.setBrake(controls['brake'])
                 
-            except Exception as e:
-                print(f"Error in ML control: {e}. Using ML fallback values.")
-                # Use ML-compatible fallback values
-                self.control.setSteer(0.0)
-                self.control.setAccel(0.5)
-                self.control.setBrake(0.0)
-        else:
-            # No ML controller available - try to create one
-            try:
-                print("ML controller not found - attempting to create one.")
-                from controller.model_controller import ModelController
-                self.ml_controller = ModelController()
-                # Call ourselves recursively with the new controller
-                self.autonomous_control(time_limit)
-            except Exception as e:
-                print(f"Could not create ML controller: {e}")
-                # Use ML-compatible fallback values
-                self.control.setSteer(0.0)
-                self.control.setAccel(0.5)
-                self.control.setBrake(0.0)
+                # Gear selection is handled separately by the gear() method
+            else:
+                print("WARNING: No model coordinator available, using fallback controls")
+                self.direct_rule_control()
+                
+        except Exception as e:
+            print(f"Error in autonomous control: {e}")
+            self.direct_rule_control()
     
     def onShutDown(self):
         '''Clean up on shutdown'''
