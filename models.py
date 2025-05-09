@@ -2,6 +2,12 @@ import tensorflow as tf
 from tensorflow.keras import layers, Model
 import numpy as np
 
+def custom_mse():
+    """Custom MSE function that can be properly serialized"""
+    def mse(y_true, y_pred):
+        return tf.reduce_mean(tf.square(y_true - y_pred))
+    return mse
+
 class BaseModel:
     """Base class for all models with common functionality"""
     
@@ -17,7 +23,7 @@ class BaseModel:
     def compile_model(self, learning_rate=0.001):
         self.model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-            loss='mse',
+            loss=custom_mse(),
             metrics=['mae']
         )
     
@@ -45,11 +51,14 @@ class BaseModel:
         return self.model.predict(X)
     
     def save(self, filepath):
-        self.model.save(filepath)
+        # Update file extension if needed
+        if filepath.endswith('.h5'):
+            filepath = filepath.replace('.h5', '.keras')
+        self.model.save(filepath, save_format='keras')
     
     @classmethod
     def load(cls, filepath):
-        return tf.keras.models.load_model(filepath)
+        return tf.keras.models.load_model(filepath, custom_objects={'mse': custom_mse()})
 
 class HighLevelModel(BaseModel):
     """High-level planning model for strategic decisions"""

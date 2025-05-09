@@ -1,9 +1,11 @@
 import os
 import numpy as np
 from data_processor import TelemetryDataProcessor
-from models import create_model
+from models import create_model, custom_mse
 import matplotlib.pyplot as plt
 import json
+import tensorflow as tf
+import pickle
 
 def plot_training_history(history, model_name, save_dir='training_plots'):
     """Plot and save training history"""
@@ -62,6 +64,7 @@ def train_all_models(data_file='telemetry.csv', sequence_length=10):
     os.makedirs('models', exist_ok=True)
     os.makedirs('training_plots', exist_ok=True)
     os.makedirs('model_info', exist_ok=True)
+    os.makedirs('model_scalers', exist_ok=True)
     
     # Initialize data processor
     processor = TelemetryDataProcessor()
@@ -118,8 +121,15 @@ def train_all_models(data_file='telemetry.csv', sequence_length=10):
         # Plot and save training history
         plot_training_history(history, model_type)
         
-        # Save model
+        # Save model with custom objects
         model.save(f'models/{model_type}_model.h5')
+        
+        # Save scaler if available
+        if hasattr(processor, 'scalers') and model_type in processor.scalers:
+            scaler_path = f'model_scalers/{model_type}_scaler.pkl'
+            with open(scaler_path, 'wb') as f:
+                pickle.dump(processor.scalers[model_type], f)
+            print(f"Saved scaler for {model_type} model")
         
         # Store results
         training_results[model_type] = {

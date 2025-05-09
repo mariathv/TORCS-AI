@@ -290,6 +290,11 @@ class Driver(object):
         '''Use ModelCoordinator for autonomous control'''
         try:
             # Prepare state data for the model
+            # Make sure we extract track and trackEdge separately from the track sensor array
+            track_sensors = self.state.track
+            track = track_sensors[:19]  # First 19 values are track sensors
+            track_edge = track_sensors[19:38] if len(track_sensors) >= 38 else [0] * 19  # Next 19 are track edge
+                
             state_data = {
                 'angle': self.state.angle,
                 'trackPos': self.state.trackPos,
@@ -298,34 +303,47 @@ class Driver(object):
                 'speedZ': self.state.speedZ,
                 'rpm': self.state.rpm,
                 'gear': self.state.gear,
-                'track': self.state.track,  # The track array contains both track and track edge data
-                # No need for trackEdge as ModelCoordinator extracts it from track data
+                'track': track_sensors,  # The full track array with both track and track edge data
                 'focus': self.state.focus,
                 'fuel': self.state.fuel,
                 'distRaced': self.state.distRaced,
                 'distFromStart': self.state.distFromStart,
                 'racePos': self.state.racePos,
                 'z': self.state.z
-                # Remove attributes that don't exist in CarState: roll, pitch, yaw, etc.
+                # The model_coordinator.prepare_state_data method will handle the track edge extraction
             }
             
             # Get control actions from model coordinator
             if self.model_coordinator:
-                controls = self.model_coordinator.get_control_actions(state_data)
-                
-                # Apply the control actions
-                self.control.setSteer(controls['steer'])
-                self.control.setAccel(controls['accel'])
-                self.control.setBrake(controls['brake'])
-                
-                # Gear selection is handled separately by the gear() method
+                try:
+                    controls = self.model_coordinator.get_control_actions(state_data)
+                    
+                    # Apply the control actions - only if they seem valid
+                    if controls and isinstance(controls, dict) and 'steer' in controls:
+                        self.control.setSteer(controls['steer'])
+                        self.control.setAccel(controls['accel'])
+                        self.control.setBrake(controls['brake'])
+                    else:
+                        # If controls aren't valid, use fallback
+                        print("WARNING: Invalid controls returned from model_coordinator, using fallback")
+                        self.basic_control()
+                except Exception as e:
+                    print(f"Error getting control actions from model_coordinator: {e}")
+                    self.basic_control()
             else:
                 print("WARNING: No model coordinator available, using fallback controls")
-                self.direct_rule_control()
+                self.basic_control()
                 
         except Exception as e:
             print(f"Error in autonomous control: {e}")
-            self.direct_rule_control()
+            self.basic_control()
+            
+    def basic_control(self):
+        """Basic control strategy as a fallback"""
+        controls = self.get_basic_controls()
+        self.control.setSteer(controls['steer'])
+        self.control.setAccel(controls['accel'])
+        self.control.setBrake(controls['brake'])
     
     def onShutDown(self):
         '''Clean up on shutdown'''

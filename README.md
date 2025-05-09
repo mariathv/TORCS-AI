@@ -1,4 +1,68 @@
-# TORCS ML Car Controller
+# TORCS-AI Neural Network Racing System
+
+This project implements a multi-model neural network approach for a TORCS AI racing system. The system uses multiple specialized neural networks to handle different aspects of racing.
+
+## Architecture
+
+The system consists of multiple specialized neural networks:
+
+1. **High-Level Planning Model**: Strategic decisions about racing line and overall strategy
+2. **Tactical Model**: Medium-term decisions for speed control and overtaking
+3. **Low-Level Control Model**: Immediate control outputs for steering, acceleration, and braking
+4. **Gear Selection Model**: Specialized model for optimal gear selection
+5. **Corner Handling Model**: Specialized model for handling corners effectively
+
+## Key Components
+
+- **data_processor.py** - Preprocesses telemetry data for training
+- **models.py** - Defines neural network architectures
+- **train_models.py** - Trains all five models
+- **model_coordinator.py** - Coordinates predictions from all models
+- **driver.py** - Interfaces with TORCS and applies the model outputs
+- **pyclient.py** - Main client for connecting to TORCS server
+
+## How to Use
+
+### Training the Models
+
+1. Collect telemetry data by driving manually with data logging enabled
+2. Train all models with:
+```
+python train_models.py
+```
+
+### Running the System
+
+1. Start the TORCS server with the SCR server enabled
+2. Connect the AI client:
+```
+python pyclient.py --host localhost --port 3001 --models_dir models
+```
+
+### Debugging
+
+If you encounter issues with model compatibility, you can check model details with:
+```
+python check_models.py
+```
+
+## Implementation Details
+
+The system uses LSTM networks for each model to handle sequential data. Each model is trained on a specific subset of the available sensor data, with features specifically selected for its task.
+
+The `ModelCoordinator` class handles sequence history for each model type and maintains separate preprocessed inputs for each model.
+
+## Troubleshooting
+
+- If you see feature count mismatch errors, check that the feature processing in `model_coordinator.py` matches what was used during training.
+- The model coordinator maintains a history buffer (sequence) for each model to feed into the LSTM networks.
+- If you change model architectures, you'll need to retrain all models to ensure compatibility.
+
+## License
+
+This project is based on the TORCS Screened Client and extends it with neural network capabilities.
+
+---
 
 ## Introduction
 

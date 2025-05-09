@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-import joblib
+import pickle
 import os
 
 class TelemetryDataProcessor:
@@ -101,21 +101,23 @@ class TelemetryDataProcessor:
         scaled_sequences = {}
         
         for model_name, sequence_data in sequences.items():
+            # Create a single scaler for both features and targets
+            scaler = StandardScaler()
+            
+            # Flatten sequence data for fitting the scaler
+            X_flat = sequence_data['X'].reshape(-1, sequence_data['X'].shape[-1])
+            scaler.fit(X_flat)
+            
             # Scale features
-            feature_scaler = StandardScaler()
-            X_scaled = feature_scaler.fit_transform(
-                sequence_data['X'].reshape(-1, sequence_data['X'].shape[-1])
-            ).reshape(sequence_data['X'].shape)
+            X_scaled = scaler.transform(X_flat).reshape(sequence_data['X'].shape)
             
-            # Scale targets
-            target_scaler = StandardScaler()
-            y_scaled = target_scaler.fit_transform(sequence_data['y'])
+            # Scale targets using the same scaler (optional)
+            # If you want separate scaling for targets, you can use a different scaler
+            # In this case, we're using the same scaler for simplicity
+            y_scaled = sequence_data['y']  # Not scaling targets
             
-            # Save scalers
-            self.scalers[model_name] = {
-                'feature_scaler': feature_scaler,
-                'target_scaler': target_scaler
-            }
+            # Save scaler
+            self.scalers[model_name] = scaler
             
             scaled_sequences[model_name] = {
                 'X': X_scaled,
@@ -126,15 +128,11 @@ class TelemetryDataProcessor:
     
     def save_scalers(self):
         """Save the scalers for later use"""
-        for model_name, scalers in self.scalers.items():
-            joblib.dump(
-                scalers['feature_scaler'],
-                os.path.join(self.scaler_dir, f'{model_name}_feature_scaler.pkl')
-            )
-            joblib.dump(
-                scalers['target_scaler'],
-                os.path.join(self.scaler_dir, f'{model_name}_target_scaler.pkl')
-            )
+        for model_name, scaler in self.scalers.items():
+            scaler_path = os.path.join(self.scaler_dir, f'{model_name}_scaler.pkl')
+            with open(scaler_path, 'wb') as f:
+                pickle.dump(scaler, f)
+            print(f"Saved scaler for {model_name}")
     
     def prepare_training_data(self, filename='telemetry.csv', sequence_length=10):
         """Prepare all data for training"""

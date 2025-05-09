@@ -5,6 +5,13 @@ from tensorflow import keras
 import json
 from sklearn.preprocessing import StandardScaler
 import pickle
+from collections import deque
+
+def custom_mse():
+    """Custom MSE function that can be properly serialized"""
+    def mse(y_true, y_pred):
+        return tf.reduce_mean(tf.square(y_true - y_pred))
+    return mse
 
 class ModelCoordinator:
     def __init__(self, models_dir='models', scalers_dir='model_scalers'):
@@ -26,16 +33,43 @@ class ModelCoordinator:
             'corner_handling'
         ]
         
+        # Define feature counts for each model based on check_models.py output
+        self.feature_counts = {
+            'high_level': 23,
+            'tactical': 15,
+            'low_level': 19,
+            'gear_selection': 13,
+            'corner_handling': 13
+        }
+        
+        # Keep sequence history for each feature set
+        self.sequence_length = 10  # Based on model input shapes
+        self.feature_history = {model_type: deque(maxlen=self.sequence_length) 
+                                for model_type in self.model_types}
+        
         # Load each model and its scaler
         for model_type in self.model_types:
             try:
-                # Load model
-                model_path = os.path.join(models_dir, f'{model_type}_model.h5')
-                if os.path.exists(model_path):
-                    self.models[model_type] = keras.models.load_model(model_path)
-                    print(f"Loaded {model_type} model")
+                # Try different model file formats (h5 or SavedModel directory)
+                model_path_h5 = os.path.join(models_dir, f'{model_type}_model.h5')
+                model_path_dir = os.path.join(models_dir, f'{model_type}_model')
+                
+                if os.path.exists(model_path_h5):
+                    # Load H5 format model
+                    self.models[model_type] = keras.models.load_model(
+                        model_path_h5, 
+                        custom_objects={'mse': custom_mse()}
+                    )
+                    print(f"Loaded {model_type} model from H5 file")
+                elif os.path.exists(model_path_dir) and os.path.isdir(model_path_dir):
+                    # Load SavedModel format
+                    self.models[model_type] = keras.models.load_model(
+                        model_path_dir,
+                        custom_objects={'mse': custom_mse()}
+                    )
+                    print(f"Loaded {model_type} model from SavedModel directory")
                 else:
-                    print(f"Warning: {model_type} model not found at {model_path}")
+                    print(f"Warning: {model_type} model not found at {model_path_h5} or {model_path_dir}")
                 
                 # Load scaler
                 scaler_path = os.path.join(scalers_dir, f'{model_type}_scaler.pkl')
@@ -55,97 +89,114 @@ class ModelCoordinator:
                 
             except Exception as e:
                 print(f"Error loading {model_type} model/scaler: {e}")
+        
+        print("Successfully loaded all models and scalers")
     
-    def prepare_state_data(self, state_data):
-        """Prepare state data for model input"""
-        # Extract track sensors
-        track_sensors = state_data['track']
+    def prepare_features_for_model(self, state_data, model_type):
+        """Prepare features specifically for a given model type"""
+        # Get required feature count for this model
+        feature_count = self.feature_counts.get(model_type, 23)  # Default to high_level if unknown
         
-        # Track sensors array contains both track and track edge information
-        # First 19 values are track sensors, next 19 are track edge sensors
-        track = track_sensors[:19]
-        track_edge = track_sensors[19:38] if len(track_sensors) >= 38 else [0] * 19
-        
-        # Check if advanced attributes exist and provide defaults if not
-        roll = state_data.get('roll', 0.0)
-        pitch = state_data.get('pitch', 0.0)
-        yaw = state_data.get('yaw', 0.0)
-        speedGlobalX = state_data.get('speedGlobalX', 0.0)
-        speedGlobalY = state_data.get('speedGlobalY', 0.0)
-        speedGlobalZ = state_data.get('speedGlobalZ', 0.0)
-        
-        # Convert state data to numpy array
-        features = np.array([
+        # Extract base features that are common to all models
+        base_features = [
             state_data['angle'],
             state_data['trackPos'],
             state_data['speedX'],
             state_data['speedY'],
             state_data['speedZ'],
             state_data['rpm'],
-            state_data['gear'],
-            *track,  # Unpack track sensors
-            *track_edge,  # Unpack track edge sensors
-            *state_data['focus'],  # Unpack focus sensors
-            state_data['fuel'],
-            state_data['distRaced'],
-            state_data['distFromStart'],
-            state_data['racePos'],
-            state_data['z'],
-            roll,
-            pitch,
-            yaw,
-            speedGlobalX,
-            speedGlobalY,
-            speedGlobalZ
-        ]).reshape(1, -1)
+            state_data['gear']
+        ]
         
-        return features
+        # Extract track sensors
+        track_sensors = state_data['track']
+        track = track_sensors[:19]  # First 19 values are track sensors
+        
+        # Create model-specific feature vectors
+        if model_type == 'high_level':
+            # High level uses more track sensors, position data
+            features = base_features + track[:18]  # 7 base + 18 track = 25, will trim to 23
+            features = features[:feature_count]  # Trim to exact feature count needed
+            
+        elif model_type == 'tactical':
+            # Tactical model focuses on immediate surroundings and speed
+            features = base_features + track[:10]  # 7 base + 10 track = 17, will trim to 15
+            features = features[:feature_count]
+            
+        elif model_type == 'low_level':
+            # Low level needs more immediate control information
+            features = base_features + track[:15]  # 7 base + 15 track = 22, will trim to 19
+            features = features[:feature_count]
+            
+        elif model_type == 'gear_selection':
+            # Gear selection mostly cares about speed, rpm, and some track data
+            features = base_features + track[:8]  # 7 base + 8 track = 15, will trim to 13
+            features = features[:feature_count]
+            
+        elif model_type == 'corner_handling':
+            # Corner handling focuses on angle, speed, track position
+            features = base_features + track[:8]  # 7 base + 8 track = 15, will trim to 13
+            features = features[:feature_count]
+        
+        # Store the features in history for this model
+        self.feature_history[model_type].append(features)
+        
+        # Only proceed if we have enough history
+        if len(self.feature_history[model_type]) < self.sequence_length:
+            # If not enough history, return None
+            return None
+        
+        # Create sequence for LSTM input
+        sequence = np.array(list(self.feature_history[model_type])).reshape(1, self.sequence_length, -1)
+        
+        return sequence
     
     def get_control_actions(self, state_data):
         """Get control actions from all models"""
         try:
-            # Prepare state data
-            features = self.prepare_state_data(state_data)
-            
             # Get predictions from each model
             predictions = {}
             
-            # High-level model for overall strategy
-            if 'high_level' in self.models:
-                if 'high_level' in self.scalers:
-                    features_scaled = self.scalers['high_level'].transform(features)
-                else:
-                    features_scaled = features
-                predictions['high_level'] = self.models['high_level'].predict(features_scaled, verbose=0)[0]
+            # Process each model with its specific feature set
+            for model_type in self.model_types:
+                if model_type in self.models:
+                    try:
+                        # Get features specifically for this model
+                        features = self.prepare_features_for_model(state_data, model_type)
+                        
+                        # Skip prediction if we don't have enough history yet
+                        if features is None:
+                            print(f"Not enough history for {model_type} model yet, skipping")
+                            continue
+                        
+                        # Apply scaling if scaler is available
+                        if model_type in self.scalers:
+                            # For sequence data, we need to reshape, transform, and reshape back
+                            original_shape = features.shape
+                            features_flat = features.reshape(-1, features.shape[-1])
+                            features_scaled = self.scalers[model_type].transform(features_flat)
+                            features = features_scaled.reshape(original_shape)
+                        
+                        # Make prediction
+                        prediction = self.models[model_type].predict(features, verbose=0)
+                        
+                        # Store the prediction
+                        predictions[model_type] = prediction[0]
+                        
+                    except Exception as e:
+                        print(f"Error predicting with {model_type} model: {e}")
             
-            # Tactical model for immediate decisions
-            if 'tactical' in self.models:
-                if 'tactical' in self.scalers:
-                    features_scaled = self.scalers['tactical'].transform(features)
-                else:
-                    features_scaled = features
-                predictions['tactical'] = self.models['tactical'].predict(features_scaled, verbose=0)[0]
-            
-            # Low-level model for precise control
-            if 'low_level' in self.models:
-                if 'low_level' in self.scalers:
-                    features_scaled = self.scalers['low_level'].transform(features)
-                else:
-                    features_scaled = features
-                predictions['low_level'] = self.models['low_level'].predict(features_scaled, verbose=0)[0]
-            
-            # Corner handling model
-            if 'corner_handling' in self.models:
-                if 'corner_handling' in self.scalers:
-                    features_scaled = self.scalers['corner_handling'].transform(features)
-                else:
-                    features_scaled = features
-                predictions['corner_handling'] = self.models['corner_handling'].predict(features_scaled, verbose=0)[0]
-            
-            # Combine predictions
-            controls = self.combine_predictions(predictions, state_data)
-            
-            return controls
+            # If we got any predictions, combine them
+            if predictions:
+                controls = self.combine_predictions(predictions, state_data)
+                return controls
+            else:
+                print("No model predictions available, using default controls")
+                return {
+                    'steer': 0.0,
+                    'accel': 0.5,
+                    'brake': 0.0
+                }
             
         except Exception as e:
             print(f"Error getting control actions: {e}")
@@ -168,31 +219,37 @@ class ModelCoordinator:
         # Combine predictions based on model type
         if 'high_level' in predictions:
             # High-level model provides overall strategy
-            controls['steer'] = predictions['high_level'][0] * 0.3  # 30% weight
-            controls['accel'] = predictions['high_level'][1] * 0.3
-            controls['brake'] = predictions['high_level'][2] * 0.3
+            high_level_pred = predictions['high_level']
+            if isinstance(high_level_pred, np.ndarray) and high_level_pred.size >= 1:
+                controls['steer'] = float(high_level_pred[0]) * 0.3  # 30% weight
         
         if 'tactical' in predictions:
             # Tactical model provides immediate decisions
-            controls['steer'] += predictions['tactical'][0] * 0.3  # 30% weight
-            controls['accel'] += predictions['tactical'][1] * 0.3
-            controls['brake'] += predictions['tactical'][2] * 0.3
+            tactical_pred = predictions['tactical']
+            if isinstance(tactical_pred, np.ndarray) and tactical_pred.size >= 1:
+                controls['accel'] = float(tactical_pred[0]) * 0.3  # 30% weight
         
         if 'low_level' in predictions:
             # Low-level model provides precise control
-            controls['steer'] += predictions['low_level'][0] * 0.2  # 20% weight
-            controls['accel'] += predictions['low_level'][1] * 0.2
-            controls['brake'] += predictions['low_level'][2] * 0.2
+            low_level_pred = predictions['low_level']
+            if isinstance(low_level_pred, np.ndarray) and low_level_pred.size >= 3:
+                controls['steer'] += float(low_level_pred[0]) * 0.2  # 20% weight
+                controls['accel'] += float(low_level_pred[1]) * 0.2
+                controls['brake'] += float(low_level_pred[2]) * 0.2
         
         if 'corner_handling' in predictions:
             # Corner handling model provides specialized control
-            controls['steer'] += predictions['corner_handling'][0] * 0.2  # 20% weight
-            controls['accel'] += predictions['corner_handling'][1] * 0.2
-            controls['brake'] += predictions['corner_handling'][2] * 0.2
+            corner_pred = predictions['corner_handling']
+            if isinstance(corner_pred, np.ndarray) and corner_pred.size >= 2:
+                controls['steer'] += float(corner_pred[0]) * 0.2  # 20% weight
+                controls['brake'] += float(corner_pred[1]) * 0.2
         
         # Ensure controls are within valid ranges
         controls['steer'] = max(-1.0, min(1.0, controls['steer']))
         controls['accel'] = max(0.0, min(1.0, controls['accel']))
         controls['brake'] = max(0.0, min(1.0, controls['brake']))
+        
+        # Output control values for debugging
+        print(f"Final controls: steer={controls['steer']:.2f}, accel={controls['accel']:.2f}, brake={controls['brake']:.2f}")
         
         return controls 
