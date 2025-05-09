@@ -1,32 +1,32 @@
 {
     "high_level": {
-        "final_train_loss": 0.0014370587887242436,
-        "final_val_loss": 0.009698674082756042,
-        "final_train_mae": 0.02263580448925495,
-        "final_val_mae": 0.07076635956764221
+        "final_train_loss": 0.17772354185581207,
+        "final_val_loss": 0.2082766592502594,
+        "final_train_mae": 0.17731481790542603,
+        "final_val_mae": 0.1712772697210312
     },
     "tactical": {
-        "final_train_loss": 0.0006737563526257873,
-        "final_val_loss": 0.0007332855020649731,
-        "final_train_mae": 0.009717701934278011,
-        "final_val_mae": 0.011172229424118996
+        "final_train_loss": 0.1757180541753769,
+        "final_val_loss": 0.1774941086769104,
+        "final_train_mae": 0.17609551548957825,
+        "final_val_mae": 0.16618628799915314
     },
     "low_level": {
-        "final_train_loss": 0.3500615358352661,
-        "final_val_loss": 0.39629065990448,
-        "final_train_mae": 0.1742965430021286,
-        "final_val_mae": 0.1851758509874344
+        "final_train_loss": 0.47378915548324585,
+        "final_val_loss": 0.4500361979007721,
+        "final_train_mae": 0.23322728276252747,
+        "final_val_mae": 0.22503729164600372
     },
     "gear_selection": {
-        "final_train_loss": 2.0021345615386963,
-        "final_val_loss": 1.991464614868164,
-        "final_train_mae": 1.0529742240905762,
-        "final_val_mae": 1.047987461090088
+        "final_train_loss": 1.9546692371368408,
+        "final_val_loss": 2.1812806129455566,
+        "final_train_mae": 0.9905521869659424,
+        "final_val_mae": 1.0370078086853027
     },
     "corner_handling": {
-        "final_train_loss": 0.6542606949806213,
-        "final_val_loss": 0.7128067016601562,
-        "final_train_mae": 0.26694169640541077,
-        "final_val_mae": 0.2775893211364746
+        "final_train_loss": 0.5019222497940063,
+        "final_val_loss": 0.49527081847190857,
+        "final_train_mae": 0.25575491786003113,
+        "final_val_mae": 0.25898778438568115
     }
 }

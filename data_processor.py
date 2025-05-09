@@ -47,13 +47,13 @@ class TelemetryDataProcessor:
             ]
         }
         
-        # Define target variables for each model
+        # Define target variables for each model - all models now predict control actions
         self.target_groups = {
-            'high_level': ['trackPos'],  # Target racing line
-            'tactical': ['speedX'],      # Target speed
-            'low_level': ['accel', 'brake', 'steer', 'clutch'],
-            'gear_selection': ['gear'],
-            'corner_handling': ['steer', 'brake']
+            'high_level': ['steer', 'accel', 'brake'],  # Strategic control
+            'tactical': ['steer', 'accel', 'brake'],    # Tactical control
+            'low_level': ['steer', 'accel', 'brake'],   # Precise control
+            'gear_selection': ['gear'],                 # Gear selection
+            'corner_handling': ['steer', 'accel', 'brake']  # Corner-specific control
         }
         
         self.scalers = {}
@@ -81,17 +81,22 @@ class TelemetryDataProcessor:
         sequences = {}
         
         for model_name, features in self.feature_groups.items():
+            # Pre-allocate arrays for better performance
             X = data[features].values
             y = data[self.target_groups[model_name]].values
             
-            X_seq, y_seq = [], []
-            for i in range(len(X) - sequence_length):
-                X_seq.append(X[i:(i + sequence_length)])
-                y_seq.append(y[i + sequence_length])
+            n_samples = len(X) - sequence_length
+            X_seq = np.zeros((n_samples, sequence_length, X.shape[1]))
+            y_seq = np.zeros((n_samples, y.shape[1]))
+            
+            # Use vectorized operations
+            for i in range(n_samples):
+                X_seq[i] = X[i:(i + sequence_length)]
+                y_seq[i] = y[i + sequence_length]
             
             sequences[model_name] = {
-                'X': np.array(X_seq),
-                'y': np.array(y_seq)
+                'X': X_seq,
+                'y': y_seq
             }
         
         return sequences
@@ -101,11 +106,15 @@ class TelemetryDataProcessor:
         scaled_sequences = {}
         
         for model_name, sequence_data in sequences.items():
+            # Reshape for scaling
+            X_reshaped = sequence_data['X'].reshape(-1, sequence_data['X'].shape[-1])
+            
             # Scale features
             feature_scaler = StandardScaler()
-            X_scaled = feature_scaler.fit_transform(
-                sequence_data['X'].reshape(-1, sequence_data['X'].shape[-1])
-            ).reshape(sequence_data['X'].shape)
+            X_scaled = feature_scaler.fit_transform(X_reshaped)
+            
+            # Reshape back
+            X_scaled = X_scaled.reshape(sequence_data['X'].shape)
             
             # Scale targets
             target_scaler = StandardScaler()
@@ -139,18 +148,22 @@ class TelemetryDataProcessor:
     def prepare_training_data(self, filename='telemetry.csv', sequence_length=10):
         """Prepare all data for training"""
         # Load and preprocess data
+        print("Loading data...")
         data = self.load_data(filename)
+        
+        print("Preprocessing data...")
         data = self.preprocess_data(data)
         
-        # Create sequences
+        print("Creating sequences...")
         sequences = self.create_sequences(data, sequence_length)
         
-        # Scale data
+        print("Scaling data...")
         scaled_sequences = self.scale_data(sequences)
         
-        # Save scalers
+        print("Saving scalers...")
         self.save_scalers()
         
+        print("Splitting data...")
         # Split data into training and validation sets
         train_val_splits = {}
         for model_name, sequence_data in scaled_sequences.items():
@@ -158,7 +171,8 @@ class TelemetryDataProcessor:
                 sequence_data['X'],
                 sequence_data['y'],
                 test_size=0.2,
-                random_state=42
+                random_state=42,
+                shuffle=True  # Enable shuffling for better training
             )
             
             train_val_splits[model_name] = {

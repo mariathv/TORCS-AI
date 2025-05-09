@@ -5,6 +5,8 @@ import time
 
 # Handle TensorFlow in the simplest, most compatible way
 import tensorflow as tf
+from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError
+from tensorflow.keras.losses import MeanSquaredError as MSELoss
 print(f"Using TensorFlow version: {tf.__version__}")
 
 # Force CPU usage to avoid GPU-related errors
@@ -22,8 +24,9 @@ class ModelController:
         # Feature count for full feature set
         self.FEATURE_COUNT = 26  # 7 base features + 19 track sensors
         
-        # Add .keras extension if needed
-        if not model_path.endswith(('.keras', '.h5')):
+        # Always use .keras extension
+        if not model_path.endswith('.keras'):
+            model_path = model_path.rsplit('.', 1)[0] if '.' in model_path else model_path
             model_path = model_path + '.keras'
             
         # Try to find the scaler at the expected path
@@ -40,7 +43,15 @@ class ModelController:
         # Load the model directly using the most compatible approach
         try:
             print(f"Loading model from {model_path}")
-            self.model = tf.keras.models.load_model(model_path, compile=False)
+            # Define custom objects to handle the metrics properly
+            custom_objects = {
+                'MeanSquaredError': MSELoss,
+                'MeanAbsoluteError': MeanAbsoluteError
+            }
+            
+            # Always load with custom objects
+            self.model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+            print("Model loaded successfully with custom objects")
             
             # Create a direct prediction function using the model
             def predict_fn(x_input):
@@ -217,4 +228,4 @@ class SimpleRuleController:
             'steer': 0.0,
             'accel': 0.5,
             'brake': 0.0
-        } 
+        }

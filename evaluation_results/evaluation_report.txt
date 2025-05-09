@@ -1,0 +1,131 @@
+Model Evaluation Report
+=====================
+
+HIGH_LEVEL MODEL
+----------------
+Normalized Metrics:
+  steer:
+    R² Score: 0.8368
+    MAE: 0.2282
+    RMSE: 0.4002
+  accel:
+    R² Score: 0.8523
+    MAE: 0.1998
+    RMSE: 0.3794
+  brake:
+    R² Score: 0.7207
+    MAE: 0.0911
+    RMSE: 0.5147
+
+Original Scale Metrics:
+  steer:
+    R² Score: 0.8368
+    MAE: 0.0289
+    RMSE: 0.0507
+  accel:
+    R² Score: 0.8523
+    MAE: 0.0802
+    RMSE: 0.1522
+  brake:
+    R² Score: 0.7207
+    MAE: 0.0035
+    RMSE: 0.0197
+
+
+TACTICAL MODEL
+--------------
+Normalized Metrics:
+  steer:
+    R² Score: 0.8470
+    MAE: 0.2348
+    RMSE: 0.3875
+  accel:
+    R² Score: 0.8673
+    MAE: 0.1779
+    RMSE: 0.3596
+  brake:
+    R² Score: 0.7332
+    MAE: 0.0858
+    RMSE: 0.5030
+
+Original Scale Metrics:
+  steer:
+    R² Score: 0.8469
+    MAE: 0.0298
+    RMSE: 0.0491
+  accel:
+    R² Score: 0.8673
+    MAE: 0.0714
+    RMSE: 0.1443
+  brake:
+    R² Score: 0.7332
+    MAE: 0.0033
+    RMSE: 0.0193
+
+
+LOW_LEVEL MODEL
+---------------
+Normalized Metrics:
+  steer:
+    R² Score: 0.6017
+    MAE: 0.3236
+    RMSE: 0.6251
+  accel:
+    R² Score: 0.8145
+    MAE: 0.2353
+    RMSE: 0.4253
+  brake:
+    R² Score: 0.1835
+    MAE: 0.1151
+    RMSE: 0.8799
+
+Original Scale Metrics:
+  steer:
+    R² Score: 0.6018
+    MAE: 0.0410
+    RMSE: 0.0792
+  accel:
+    R² Score: 0.8144
+    MAE: 0.0944
+    RMSE: 0.1706
+  brake:
+    R² Score: 0.1836
+    MAE: 0.0044
+    RMSE: 0.0337
+
+
+GEAR_SELECTION MODEL
+--------------------
+Error: Found array with dim 3. None expected <= 2.
+
+CORNER_HANDLING MODEL
+---------------------
+Normalized Metrics:
+  steer:
+    R² Score: 0.6020
+    MAE: 0.3194
+    RMSE: 0.6248
+  accel:
+    R² Score: 0.7185
+    MAE: 0.2980
+    RMSE: 0.5238
+  brake:
+    R² Score: 0.1814
+    MAE: 0.1281
+    RMSE: 0.8811
+
+Original Scale Metrics:
+  steer:
+    R² Score: 0.6021
+    MAE: 0.0405
+    RMSE: 0.0792
+  accel:
+    R² Score: 0.7185
+    MAE: 0.1196
+    RMSE: 0.2101
+  brake:
+    R² Score: 0.1815
+    MAE: 0.0049
+    RMSE: 0.0337
+
+

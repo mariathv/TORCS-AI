@@ -38,8 +38,19 @@ class Driver(object):
         self.control = carControl.CarControl()
         
         self.steer_lock = 0.785398
-        self.max_speed = 180
+        self.max_speed = 330  # Updated max speed
         self.prev_rpm = None
+        
+        # Store last steering value for smoothing
+        self.last_steer = 0
+        # Store last acceleration value for smoothing
+        self.last_accel = 0
+        # Keep track of time in reverse
+        self.reverse_time = 0
+        # Track when we started braking
+        self.brake_start_time = 0
+        # Track if we're currently in reverse mode
+        self.in_reverse_mode = False
 
         self.manual_mode = manual_mode
         self.max_episodes = max_episodes
@@ -173,43 +184,91 @@ class Driver(object):
             self.control.setGear(1)
             return self.control.toMsg()
     
+    def smooth_value(self, current, previous, smoothing_factor=0.1):
+        """Apply smoothing between current and previous value"""
+        return previous + smoothing_factor * (current - previous)
+    
     def manual_control(self):
         '''Manual control with automatic gear shifting'''
         current_speed = self.state.getSpeedX()
         current_gear = self.state.getGear()
         
-        # Steering control
+        # Steering control with smoother transitions
+        target_steer = 0
         if keyboard.is_pressed('right'):
-            self.control.setSteer(-0.75)  # Full left
+            target_steer = -0.5  # Reduced magnitude for gentler steering
         elif keyboard.is_pressed('left'):
-            self.control.setSteer(0.75)   # Full right
-        else:
-            self.control.setSteer(0)     # No steering
-
-        # Acceleration / Braking / Reversing
+            target_steer = 0.5   # Reduced magnitude for gentler steering
+        
+        # Apply stronger smoothing to steering (lower value = smoother transition)
+        smooth_steer = self.smooth_value(target_steer, self.last_steer, 0.15)
+        self.control.setSteer(smooth_steer)
+        self.last_steer = smooth_steer
+        
+        # Handle reverse mode tracking
+        if keyboard.is_pressed('down') and current_speed < 1.0:
+            # If down key is pressed and we're almost stopped, consider it reverse intent
+            if not self.in_reverse_mode and current_gear != -1:
+                self.in_reverse_mode = True
+                
+        if keyboard.is_pressed('up') and self.in_reverse_mode:
+            # If up key is pressed while in reverse mode, exit reverse mode
+            self.in_reverse_mode = False
+            
+        # Acceleration / Braking / Reversing with improved logic
         if keyboard.is_pressed('up'):
-            if current_gear == -1:
-                # If in reverse, switch to 1st gear before accelerating
+            if self.in_reverse_mode or current_gear == -1:
+                # Exit reverse mode and shift to forward gear
+                self.in_reverse_mode = False
                 self.control.setGear(1)
-
-            self.control.setAccel(1.0 if current_speed < self.max_speed else 0)
+                # Apply gentle acceleration from reverse
+                target_accel = 0.3
+            else:
+                # Progressive acceleration based on speed
+                max_accel = 1.0 if current_speed < self.max_speed else 0.3
+                target_accel = min(max_accel, self.last_accel + 0.1)  # Smooth acceleration ramp-up
+            
             self.control.setBrake(0)
-
+            
         elif keyboard.is_pressed('down'):
             if current_speed > 1.0:  
-                # If moving forward, apply brakes
+                # If moving forward, apply progressive braking
+                if self.brake_start_time == 0:
+                    self.brake_start_time = time.time()
+                
+                # Calculate how long we've been braking
+                brake_duration = time.time() - self.brake_start_time
+                
+                # Increase brake pressure over time, up to a maximum
+                brake_pressure = min(1.0, 0.3 + brake_duration * 0.5)
+                
                 self.control.setAccel(0)
-                self.control.setBrake(1.0)
+                self.control.setBrake(brake_pressure)
+                target_accel = 0
             else:
-                # If stopped or moving backward, switch to reverse
-                self.control.setGear(-1)
-                self.control.setAccel(1.0)
-                self.control.setBrake(0)
-
+                # Stopped or almost stopped, handle reverse
+                self.brake_start_time = 0  # Reset brake timer
+                
+                # If we're in reverse mode, ensure the gear is -1 and apply acceleration
+                if self.in_reverse_mode or current_gear == -1:
+                    self.control.setGear(-1)
+                    target_accel = min(0.7, self.last_accel + 0.05)  # Gentle acceleration in reverse
+                else:
+                    # Just stopping, not yet in reverse
+                    target_accel = 0
+                    self.control.setBrake(0.1)  # Light brake to ensure full stop
+            
         else:
-            self.control.setAccel(0)
+            # No pedal inputs, coast with minimal braking
+            self.brake_start_time = 0  # Reset brake timer
+            target_accel = max(0, self.last_accel - 0.1)  # Gradually reduce acceleration
             self.control.setBrake(0)
-
+        
+        # Apply smoothed acceleration
+        smooth_accel = self.smooth_value(target_accel, self.last_accel, 0.3)
+        self.control.setAccel(smooth_accel)
+        self.last_accel = smooth_accel
+        
         # Apply gear shifting
         self.gear()
 
@@ -257,7 +316,7 @@ class Driver(object):
         }
 
     def gear(self):
-        '''Automatic gear shifting logic'''
+        '''Improved automatic gear shifting logic with hysteresis to prevent gear hunting'''
         rpm = self.state.getRpm()
         gear = self.state.getGear()
         speed = self.state.getSpeedX()
@@ -266,29 +325,129 @@ class Driver(object):
         if gear == -1:
             # Only get out of reverse if we're explicitly trying to go forward
             if self.control.getAccel() > 0 and self.control.getBrake() == 0 and speed > -1.0:
-                self.control.setGear(1)
+                # Only shift to forward if not in reverse mode
+                if not self.in_reverse_mode:
+                    self.control.setGear(1)
             return
 
         # Standing still or very slow: use first gear
         if abs(speed) < 0.5:
-            self.control.setGear(1)
+            # If we're in reverse mode, use reverse gear
+            if self.in_reverse_mode:
+                self.control.setGear(-1)
+            else:
+                self.control.setGear(1)
+            return
+        
+        # Check if we were in neutral
+        if gear == 0:
+            if self.in_reverse_mode:
+                self.control.setGear(-1)
+            else:
+                self.control.setGear(1)
             return
 
-        # Regular shifting based on RPM
-        if rpm > 7500 and gear < 6:
-            # Upshift if RPM is high
-            self.control.setGear(gear + 1)
-        elif rpm < 3000 and gear > 1:
-            # Downshift if RPM is low
-            self.control.setGear(gear - 1)
+        # Store the old RPM ranges - tuned for stability
+        # Adding hysteresis - different thresholds for upshift vs downshift
+        upshift_rpm = 8000     # Only upshift when RPM is very high
+        upshift_rpm_min = 6500 # Don't upshift below this RPM even if in speed range
+        downshift_rpm = 3000   # Downshift if RPM gets this low
         
-        # Recovery from neutral gear
-        if gear == 0:
-            self.control.setGear(1)
+        # Add hysteresis to speed ranges too - different ranges for up/down shifting
+        gear_speed_up_ranges = {
+            1: (0, 70),      # 1st gear: 0-70 km/h (upshift point)
+            2: (50, 110),    # 2nd gear: 50-110 km/h (upshift point)
+            3: (90, 170),    # 3rd gear: 90-170 km/h (upshift point)
+            4: (150, 230),   # 4th gear: 150-230 km/h (upshift point)
+            5: (210, 290),   # 5th gear: 210-290 km/h (upshift point)
+            6: (270, 330)    # 6th gear: 270-330 km/h
+        }
+        
+        gear_speed_down_ranges = {
+            1: (0, 50),      # 1st gear: 0-50 km/h (downshift point)
+            2: (30, 90),     # 2nd gear: 30-90 km/h (downshift point)
+            3: (70, 150),    # 3rd gear: 70-150 km/h (downshift point)
+            4: (130, 210),   # 4th gear: 130-210 km/h (downshift point)
+            5: (190, 270),   # 5th gear: 190-270 km/h (downshift point)
+            6: (250, 330)    # 6th gear: 250-330 km/h
+        }
+        
+        # Add gear change delay to prevent rapid shifting
+        if not hasattr(self, 'last_gear_change_time'):
+            self.last_gear_change_time = 0
+        
+        current_time = time.time()
+        # Don't allow gear changes more frequently than every 0.5 seconds
+        # Unless RPM is critically low or high
+        time_since_last_change = current_time - self.last_gear_change_time
+        gear_change_allowed = time_since_last_change > 0.5 or rpm < 2500 or rpm > 8500
+        
+        # GEAR SELECTION LOGIC
+        new_gear = gear  # Start with current gear
+        
+        # First handle extreme cases that should override the delay
+        if rpm > 8500 and gear < 6:
+            # Engine protection - always upshift if RPM is dangerously high
+            new_gear = gear + 1
+            self.last_gear_change_time = current_time
+        elif rpm < 2500 and gear > 1:
+            # Engine protection - always downshift if RPM is dangerously low
+            new_gear = gear - 1
+            self.last_gear_change_time = current_time
+        # Otherwise, only change gears if enough time has passed
+        elif gear_change_allowed:
+            # UPSHIFT LOGIC
+            if gear < 6 and rpm > upshift_rpm:
+                # Consider upshifting if RPM is high enough
+                # BUT only if we're also in the right speed range for the next gear
+                if gear + 1 in gear_speed_up_ranges:
+                    min_speed, _ = gear_speed_up_ranges[gear + 1]
+                    if speed >= min_speed:
+                        new_gear = gear + 1
+                        self.last_gear_change_time = current_time
+            
+            # DOWNSHIFT LOGIC
+            elif gear > 1 and (rpm < downshift_rpm or 
+                            (gear in gear_speed_down_ranges and 
+                            speed < gear_speed_down_ranges[gear][0])):
+                # Downshift if RPM is too low OR we're below the speed range for this gear
+                new_gear = gear - 1
+                self.last_gear_change_time = current_time
+                
+            # Special case for very high speeds - ensure we're in top gear
+            elif speed > 280 and gear < 6:
+                new_gear = 6
+                self.last_gear_change_time = current_time
+                
+            # Special case for significant mismatch between gear and speed
+            # If we're more than 2 gears away from where we should be
+            elif gear > 2:  # Only check if we're in 3rd gear or higher
+                # Find what gear we should be in based on speed
+                target_gear = 1  # Default to first gear
+                for g in range(1, 7):
+                    if g in gear_speed_down_ranges:
+                        min_speed, max_speed = gear_speed_down_ranges[g]
+                        if min_speed <= speed <= max_speed:
+                            target_gear = g
+                            break
+                
+                # If we're significantly mis-geared (more than 2 gears off), start correcting
+                if gear > target_gear + 2:
+                    new_gear = gear - 1
+                    self.last_gear_change_time = current_time
+        
+        # Apply the gear change if needed
+        if new_gear != gear:
+            self.control.setGear(new_gear)
     
     def autonomous_control(self, time_limit=None):
         '''Use ModelCoordinator for autonomous control'''
         try:
+            # Get track sensors from state
+            track_sensors = self.state.getTrack()
+            if track_sensors is None:
+                track_sensors = [0.0] * 19  # Default to zeros if no track data
+            
             # Prepare state data for the model
             state_data = {
                 'angle': self.state.angle,
@@ -298,34 +457,35 @@ class Driver(object):
                 'speedZ': self.state.speedZ,
                 'rpm': self.state.rpm,
                 'gear': self.state.gear,
-                'track': self.state.track,  # The track array contains both track and track edge data
-                # No need for trackEdge as ModelCoordinator extracts it from track data
                 'focus': self.state.focus,
                 'fuel': self.state.fuel,
                 'distRaced': self.state.distRaced,
                 'distFromStart': self.state.distFromStart,
                 'racePos': self.state.racePos,
                 'z': self.state.z
-                # Remove attributes that don't exist in CarState: roll, pitch, yaw, etc.
             }
             
+            # Add track sensors individually
+            for i, value in enumerate(track_sensors):
+                state_data[f'track_{i}'] = value
+            
             # Get control actions from model coordinator
-            if self.model_coordinator:
-                controls = self.model_coordinator.get_control_actions(state_data)
-                
-                # Apply the control actions
-                self.control.setSteer(controls['steer'])
-                self.control.setAccel(controls['accel'])
-                self.control.setBrake(controls['brake'])
-                
-                # Gear selection is handled separately by the gear() method
-            else:
-                print("WARNING: No model coordinator available, using fallback controls")
-                self.direct_rule_control()
-                
+            controls = self.model_coordinator.get_control_actions(state_data)
+            
+            # Apply controls
+            self.control.setSteer(controls['steer'])
+            self.control.setAccel(controls['accel'])
+            self.control.setBrake(controls['brake'])
+            
+            # Automatic gear shifting
+            self.gear()
+            
         except Exception as e:
             print(f"Error in autonomous control: {e}")
-            self.direct_rule_control()
+            # Fallback to basic controls
+            self.control.setSteer(0.0)
+            self.control.setAccel(0.0)
+            self.control.setBrake(1.0)  # Emergency brake
     
     def onShutDown(self):
         '''Clean up on shutdown'''
@@ -337,4 +497,9 @@ class Driver(object):
         '''Handle restart event'''
         if hasattr(self, 'telemetry_logger'):
             self.telemetry_logger.start_new_episode()
+        # Reset control variables
+        self.last_steer = 0
+        self.last_accel = 0
+        self.in_reverse_mode = False
+        self.brake_start_time = 0
         pass

@@ -1,6 +1,13 @@
 import tensorflow as tf
 from tensorflow.keras import layers, Model
 import numpy as np
+from tensorflow.keras.losses import MeanSquaredError
+from tensorflow.keras.metrics import MeanAbsoluteError
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class BaseModel:
     """Base class for all models with common functionality"""
@@ -17,8 +24,8 @@ class BaseModel:
     def compile_model(self, learning_rate=0.001):
         self.model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-            loss='mse',
-            metrics=['mae']
+            loss=MeanSquaredError(),
+            metrics=[MeanAbsoluteError()]
         )
     
     def train(self, X_train, y_train, X_val, y_val, epochs=100, batch_size=32):
@@ -30,11 +37,17 @@ class BaseModel:
             callbacks=[
                 tf.keras.callbacks.EarlyStopping(
                     monitor='val_loss',
-                    patience=10,
+                    patience=15,
                     restore_best_weights=True
                 ),
+                tf.keras.callbacks.ReduceLROnPlateau(
+                    monitor='val_loss',
+                    factor=0.5,
+                    patience=5,
+                    min_lr=1e-6
+                ),
                 tf.keras.callbacks.ModelCheckpoint(
-                    f'models/{self.model_name}_best.h5',
+                    f'models/{self.model_name}_best.keras',
                     monitor='val_loss',
                     save_best_only=True
                 )
@@ -45,10 +58,16 @@ class BaseModel:
         return self.model.predict(X)
     
     def save(self, filepath):
+        if not filepath.endswith('.keras'):
+            filepath = filepath.replace('.h5', '.keras')
+            if not filepath.endswith('.keras'):
+                filepath += '.keras'
         self.model.save(filepath)
     
     @classmethod
     def load(cls, filepath):
+        if filepath.endswith('.h5'):
+            filepath = filepath.replace('.h5', '.keras')
         return tf.keras.models.load_model(filepath)
 
 class HighLevelModel(BaseModel):
@@ -59,15 +78,23 @@ class HighLevelModel(BaseModel):
         
         # LSTM layers for sequence processing
         x = layers.LSTM(128, return_sequences=True)(inputs)
-        x = layers.Dropout(0.2)(x)
-        x = layers.LSTM(64)(x)
+        x = layers.BatchNormalization()(x)
         x = layers.Dropout(0.2)(x)
         
-        # Dense layers for decision making
+        x = layers.LSTM(64, return_sequences=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.2)(x)
+        
+        # Dense layers for control output
         x = layers.Dense(64, activation='relu')(x)
-        x = layers.Dense(32, activation='relu')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.2)(x)
         
-        outputs = layers.Dense(self.output_shape, activation='linear')(x)
+        x = layers.Dense(32, activation='relu')(x)
+        x = layers.BatchNormalization()(x)
+        
+        # Output layer with tanh activation for bounded outputs
+        outputs = layers.Dense(self.output_shape, activation='tanh')(x)
         
         return Model(inputs=inputs, outputs=outputs, name='high_level_model')
 
@@ -77,19 +104,27 @@ class TacticalModel(BaseModel):
     def _build_model(self):
         inputs = layers.Input(shape=self.input_shape)
         
-        # Convolutional layers for spatial features
+        # Convolutional layers for feature extraction
         x = layers.Conv1D(64, 3, activation='relu', padding='same')(inputs)
+        x = layers.BatchNormalization()(x)
         x = layers.MaxPooling1D(2)(x)
+        
         x = layers.Conv1D(32, 3, activation='relu', padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.MaxPooling1D(2)(x)
         
-        # LSTM layers for temporal features
-        x = layers.LSTM(64, return_sequences=True)(x)
+        # LSTM layer for temporal dependencies
+        x = layers.LSTM(64, return_sequences=False)(x)
+        x = layers.BatchNormalization()(x)
         x = layers.Dropout(0.2)(x)
-        x = layers.LSTM(32)(x)
         
-        # Dense layers
+        # Dense layers for control output
         x = layers.Dense(32, activation='relu')(x)
-        outputs = layers.Dense(self.output_shape, activation='linear')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.2)(x)
+        
+        # Output layer with tanh activation
+        outputs = layers.Dense(self.output_shape, activation='tanh')(x)
         
         return Model(inputs=inputs, outputs=outputs, name='tactical_model')
 
@@ -99,19 +134,24 @@ class LowLevelModel(BaseModel):
     def _build_model(self):
         inputs = layers.Input(shape=self.input_shape)
         
-        # Convolutional layers for immediate sensor processing
+        # Convolutional layers for immediate feature extraction
         x = layers.Conv1D(32, 3, activation='relu', padding='same')(inputs)
-        x = layers.Conv1D(64, 3, activation='relu', padding='same')(x)
+        x = layers.BatchNormalization()(x)
         
-        # LSTM for temporal dependencies
-        x = layers.LSTM(64, return_sequences=True)(x)
+        x = layers.Conv1D(16, 3, activation='relu', padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        
+        # LSTM layer for short-term temporal dependencies
+        x = layers.LSTM(32, return_sequences=False)(x)
+        x = layers.BatchNormalization()(x)
         x = layers.Dropout(0.2)(x)
-        x = layers.LSTM(32)(x)
         
-        # Dense layers for control outputs
-        x = layers.Dense(64, activation='relu')(x)
-        x = layers.Dense(32, activation='relu')(x)
-        outputs = layers.Dense(self.output_shape, activation='tanh')(x)  # tanh for bounded outputs
+        # Dense layers for precise control
+        x = layers.Dense(16, activation='relu')(x)
+        x = layers.BatchNormalization()(x)
+        
+        # Output layer with tanh activation
+        outputs = layers.Dense(self.output_shape, activation='tanh')(x)
         
         return Model(inputs=inputs, outputs=outputs, name='low_level_model')
 
@@ -121,10 +161,9 @@ class GearSelectionModel(BaseModel):
     def _build_model(self):
         inputs = layers.Input(shape=self.input_shape)
         
-        # Dense layers for gear selection
-        x = layers.Dense(64, activation='relu')(inputs)
-        x = layers.Dropout(0.2)(x)
-        x = layers.Dense(32, activation='relu')(x)
+        # Simplified dense layers
+        x = layers.Dense(32, activation='relu')(inputs)
+        x = layers.Dropout(0.1)(x)
         
         # Output layer with softmax for gear selection
         outputs = layers.Dense(self.output_shape, activation='softmax')(x)
@@ -139,12 +178,20 @@ class CornerHandlingModel(BaseModel):
         
         # LSTM layers for corner sequence processing
         x = layers.LSTM(64, return_sequences=True)(inputs)
+        x = layers.BatchNormalization()(x)
         x = layers.Dropout(0.2)(x)
-        x = layers.LSTM(32)(x)
         
-        # Dense layers for corner-specific controls
+        x = layers.LSTM(32, return_sequences=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.2)(x)
+        
+        # Dense layers for corner-specific control
         x = layers.Dense(32, activation='relu')(x)
-        outputs = layers.Dense(self.output_shape, activation='tanh')(x)  # tanh for bounded outputs
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(0.2)(x)
+        
+        # Output layer with tanh activation
+        outputs = layers.Dense(self.output_shape, activation='tanh')(x)
         
         return Model(inputs=inputs, outputs=outputs, name='corner_handling_model')
 
@@ -161,4 +208,4 @@ def create_model(model_type, input_shape, output_shape):
     if model_type not in model_classes:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    return model_classes[model_type](input_shape, output_shape, model_type) 
+    return model_classes[model_type](input_shape, output_shape, model_type)

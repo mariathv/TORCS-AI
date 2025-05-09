@@ -5,6 +5,32 @@ import os
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import pickle
+import tensorflow as tf
+from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError
+from tensorflow.keras.losses import MeanSquaredError as MSELoss
+
+def load_model_safely(model_path, model_type="unknown"):
+    """
+    Load a model with error handling and custom objects to fix the 'mse' issue
+    """
+    try:
+        # Always load with custom objects to handle metrics properly
+        custom_objects = {
+            'MeanSquaredError': MSELoss,
+            'MeanAbsoluteError': MeanAbsoluteError
+        }
+        
+        # Ensure proper file extension
+        if not model_path.endswith('.keras'):
+            model_path = model_path.rsplit('.', 1)[0] if '.' in model_path else model_path
+            model_path += '.keras'
+            
+        model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+        print(f"Successfully loaded {model_type} model")
+        return model
+    except Exception as e:
+        print(f"Error loading {model_type} model/scaler: {e}")
+        return None
 
 def main():
     # Parse command line arguments
@@ -41,8 +67,9 @@ def main():
         
         # Save the scaler for inference
         if args.save_scaler:
-            # Add .keras extension if needed for determining the model path 
-            if not model_path.endswith(('.keras', '.h5')):
+            # Always use .keras extension 
+            if not model_path.endswith('.keras'):
+                model_path = model_path.rsplit('.', 1)[0] if '.' in model_path else model_path
                 actual_model_path = model_path + '.keras'
             else:
                 actual_model_path = model_path
@@ -72,7 +99,8 @@ def main():
             print(f"Model info saved to {info_path}")
     else:
         # Just load the model to verify it exists
-        model = load_trained_model(model_path)
+        # Using our new safer loading function
+        model = load_model_safely(model_path, "main")
         if model:
             print("=" * 50)
             print("Model loaded successfully. Ready for inference.")

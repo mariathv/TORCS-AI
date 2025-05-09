@@ -4,6 +4,6 @@
         10,
         15
     ],
-    "output_shape": 1,
-    "total_params": 47457
+    "output_shape": 3,
+    "total_params": 10371
 }
