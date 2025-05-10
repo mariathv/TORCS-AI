@@ -40,15 +40,19 @@ class ModelCoordinator:
         
         # Model weights for combining predictions
         self.model_weights = {
-            'high_level': 0.5,  # Equal weight for high-level model
-            'tactical': 0.5     # Equal weight for tactical model
+            'high_level': 0.4,    # Strategic control
+            'tactical': 0.3,      # Tactical control
+            'low_level': 0.15,    # Precise control
+            'corner_handling': 0.15  # Corner-specific control
         }
         
         # Sequence handling
         self.sequence_length = 10
         self.state_history = {
             'high_level': [],
-            'tactical': []
+            'tactical': [],
+            'low_level': [],
+            'corner_handling': []
         }
         
         # Pre-allocate feature arrays for all models
@@ -64,21 +68,32 @@ class ModelCoordinator:
                 'speedX', 'speedY', 'speedZ', 'angle', 'trackPos',
                 'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
                 'track_5', 'track_6', 'track_7', 'track_8', 'track_9'
+            ],
+            'low_level': [
+                'speedX', 'speedY', 'speedZ', 'angle', 'rpm',
+                'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
+                'track_5', 'track_6', 'track_7', 'track_8', 'track_9',
+                'wheelSpinVel_0', 'wheelSpinVel_1', 'wheelSpinVel_2', 'wheelSpinVel_3'
+            ],
+            'corner_handling': [
+                'speedX', 'angle', 'trackPos',
+                'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
+                'track_5', 'track_6', 'track_7', 'track_8', 'track_9'
             ]
         }
         
         self.feature_arrays = {}
         self.sequence_arrays = {}
         
-        for model_type in ['high_level', 'tactical']:
+        for model_type in ['high_level', 'tactical', 'low_level', 'corner_handling']:
             feature_count = len(self.feature_groups[model_type])
             self.feature_arrays[model_type] = np.zeros((1, feature_count), dtype=np.float32)
             self.sequence_arrays[model_type] = np.zeros((1, self.sequence_length, feature_count), dtype=np.float32)
         
         try:
-            # Load both models for combined predictions
-            self._load_models(['high_level', 'tactical'])
-            self._load_scalers(['high_level', 'tactical'])
+            # Load all models for combined predictions
+            self._load_models(['high_level', 'tactical', 'low_level', 'corner_handling'])
+            self._load_scalers(['high_level', 'tactical', 'low_level', 'corner_handling'])
             
             # Create optimized prediction functions
             @tf.function(experimental_compile=True)
@@ -89,21 +104,34 @@ class ModelCoordinator:
             def predict_tactical(x_input):
                 return self.models['tactical'](x_input, training=False)
             
+            @tf.function(experimental_compile=True)
+            def predict_low_level(x_input):
+                return self.models['low_level'](x_input, training=False)
+            
+            @tf.function(experimental_compile=True)
+            def predict_corner_handling(x_input):
+                return self.models['corner_handling'](x_input, training=False)
+            
             self.predict_fns = {
                 'high_level': predict_high_level,
-                'tactical': predict_tactical
+                'tactical': predict_tactical,
+                'low_level': predict_low_level,
+                'corner_handling': predict_corner_handling
             }
             
             # Pre-warm the models with dummy predictions
-            for model_type in ['high_level', 'tactical']:
+            for model_type in ['high_level', 'tactical', 'low_level', 'corner_handling']:
                 feature_count = len(self.feature_groups[model_type])
                 dummy_input = np.zeros((1, self.sequence_length, feature_count), dtype=np.float32)
                 _ = self.predict_fns[model_type](dummy_input)
             
-            print("MODEL COORDINATOR: Using high_level + tactical models")
-            print(f"MODEL WEIGHTS: high_level={self.model_weights['high_level']}, tactical={self.model_weights['tactical']}")
+            print("MODEL COORDINATOR: Using all models (high_level + tactical + low_level + corner_handling)")
+            print(f"MODEL WEIGHTS: high_level={self.model_weights['high_level']}, " +
+                  f"tactical={self.model_weights['tactical']}, " +
+                  f"low_level={self.model_weights['low_level']}, " +
+                  f"corner_handling={self.model_weights['corner_handling']}")
             
-            for model_type in ['high_level', 'tactical']:
+            for model_type in ['high_level', 'tactical', 'low_level', 'corner_handling']:
                 if model_type in self.models:
                     print(f"{model_type.upper()} MODEL: {self.models[model_type].input_shape} → {self.models[model_type].output_shape}")
             
@@ -271,17 +299,40 @@ class ModelCoordinator:
                     print(f"{model_type.upper()}: steer={controls['steer']:.4f}, accel={controls['accel']:.4f}, brake={controls['brake']:.4f}")
                 print(f"COMBINED:   steer={steer:.4f}, accel={accel:.4f}, brake={brake:.4f}")
             
-            # Get basic state variables for logging
+            # Adjust steering based on state
             speed = state_data.get('speedX', 0.0)
             track_pos = state_data.get('trackPos', 0.0)
+            
+            # Limit steering based on speed
+            max_steer = 0.5
+            if speed > 50:
+                max_steer = 0.3
+            elif speed > 30:
+                max_steer = 0.4
+            steer_limited = np.clip(steer, -max_steer, max_steer)
+            
+            # Add track position correction
+            track_correction = -track_pos * 0.3  # Gentle correction towards center
+            steer_corrected = np.clip(steer_limited + track_correction, -max_steer, max_steer)
+            
+            # Adjust acceleration based on speed
+            if speed < 5.0:  # Very slow
+                accel_adjusted = 0.5  # More aggressive acceleration
+                brake_adjusted = 0.0
+            elif speed > 100:  # Very fast
+                accel_adjusted = 0.3
+                brake_adjusted = 0.1
+            else:
+                accel_adjusted = accel
+                brake_adjusted = brake
             
             # Ensure acceleration is in valid range
             accel = max(0.0, min(1.0, accel))  # Clip between 0.0 and 1.0
             
             # Apply control smoothing
-            steer_final = self.apply_control_smoothing(steer, 'steer')
-            accel_final = self.apply_control_smoothing(accel, 'accel')
-            brake_final = self.apply_control_smoothing(brake, 'brake')
+            steer_final = self.apply_control_smoothing(steer_corrected, 'steer')
+            accel_final = self.apply_control_smoothing(accel_adjusted, 'accel')
+            brake_final = self.apply_control_smoothing(brake_adjusted, 'brake')
             
             # Log detailed output parameters
             if self.log_counter >= self.log_frequency:
@@ -292,7 +343,10 @@ class ModelCoordinator:
                 print("\n----- Processing Steps -----")
                 print(f"1. Raw NN Outputs:    (see above)")
                 print(f"2. Combined Output:   steer={steer:.4f}, accel={accel:.4f}, brake={brake:.4f}")
-                print(f"3. Final Smoothed:    steer={steer_final:.4f}, accel={accel_final:.4f}, brake={brake_final:.4f}")
+                print(f"3. Speed Limiting:    steer={steer_limited:.4f} (max={max_steer:.2f})")
+                print(f"4. Track Correction:  steer={steer_corrected:.4f} (correction={track_correction:.4f})")
+                print(f"5. Speed Adjustments: accel={accel_adjusted:.4f}, brake={brake_adjusted:.4f}")
+                print(f"6. Final Smoothed:    steer={steer_final:.4f}, accel={accel_final:.4f}, brake={brake_final:.4f}")
                 
                 # Reset counter
                 self.log_counter = 0
