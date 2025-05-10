@@ -27,13 +27,9 @@ class BaseModel:
             metrics=['mae']
         )
     
-    def train(self, X_train, y_train, X_val, y_val, epochs=100, batch_size=32):
-        return self.model.fit(
-            X_train, y_train,
-            validation_data=(X_val, y_val),
-            epochs=epochs,
-            batch_size=batch_size,
-            callbacks=[
+    def train(self, X_train, y_train, X_val, y_val, epochs=100, batch_size=32, callbacks=None):
+        if callbacks is None:
+            callbacks = [
                 tf.keras.callbacks.EarlyStopping(
                     monitor='val_loss',
                     patience=10,
@@ -45,7 +41,15 @@ class BaseModel:
                     save_best_only=True
                 )
             ]
+        
+        return self.model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=callbacks
         )
+
     
     def predict(self, X):
         return self.model.predict(X)

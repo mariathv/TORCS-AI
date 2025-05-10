@@ -50,12 +50,20 @@ class ModelCoordinator:
         # Load each model and its scaler
         for model_type in self.model_types:
             try:
-                # Try different model file formats (h5 or SavedModel directory)
+                # Try different model file formats (keras, h5 or SavedModel directory)
+                model_path_keras = os.path.join(models_dir, f'{model_type}_model.keras')
                 model_path_h5 = os.path.join(models_dir, f'{model_type}_model.h5')
                 model_path_dir = os.path.join(models_dir, f'{model_type}_model')
                 
-                if os.path.exists(model_path_h5):
-                    # Load H5 format model
+                if os.path.exists(model_path_keras):
+                    # Load Keras format model (preferred)
+                    self.models[model_type] = keras.models.load_model(
+                        model_path_keras, 
+                        custom_objects={'mse': custom_mse()}
+                    )
+                    print(f"Loaded {model_type} model from Keras file")
+                elif os.path.exists(model_path_h5):
+                    # Load H5 format model (legacy)
                     self.models[model_type] = keras.models.load_model(
                         model_path_h5, 
                         custom_objects={'mse': custom_mse()}
@@ -69,7 +77,7 @@ class ModelCoordinator:
                     )
                     print(f"Loaded {model_type} model from SavedModel directory")
                 else:
-                    print(f"Warning: {model_type} model not found at {model_path_h5} or {model_path_dir}")
+                    print(f"Warning: {model_type} model not found at {model_path_keras}, {model_path_h5} or {model_path_dir}")
                 
                 # Load scaler
                 scaler_path = os.path.join(scalers_dir, f'{model_type}_scaler.pkl')

@@ -29,11 +29,21 @@ def check_model_scaler_compatibility(models_dir='models', scalers_dir='model_sca
         print("-" * 40)
         
         # Check if model exists
+        model_path_keras = os.path.join(models_dir, f'{model_type}_model.keras')
         model_path_h5 = os.path.join(models_dir, f'{model_type}_model.h5')
         model_path_dir = os.path.join(models_dir, f'{model_type}_model')
         
         model = None
-        if os.path.exists(model_path_h5):
+        if os.path.exists(model_path_keras):
+            try:
+                model = keras.models.load_model(
+                    model_path_keras, 
+                    custom_objects={'mse': custom_mse()}
+                )
+                print(f"Loaded {model_type} model from Keras file")
+            except Exception as e:
+                print(f"Error loading {model_type} model from Keras: {e}")
+        elif os.path.exists(model_path_h5):
             try:
                 model = keras.models.load_model(
                     model_path_h5, 
@@ -52,8 +62,7 @@ def check_model_scaler_compatibility(models_dir='models', scalers_dir='model_sca
             except Exception as e:
                 print(f"Error loading {model_type} model from directory: {e}")
         else:
-            print(f"Model not found at {model_path_h5} or {model_path_dir}")
-            continue
+            print(f"Model not found at {model_path_keras}, {model_path_h5} or {model_path_dir}")
         
         # Check model input shape
         if model:
