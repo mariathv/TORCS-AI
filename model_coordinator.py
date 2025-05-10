@@ -4,17 +4,21 @@ import tensorflow as tf
 from tensorflow import keras
 import json
 import joblib
+import time
 from typing import Dict, List, Tuple, Optional
 import logging
 
-# Configure logging at module level
-logging.basicConfig(level=logging.INFO)
+# Configure logging at module level - reduce logging overhead
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Force CPU usage to avoid GPU-related overhead
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 class ModelCoordinator:
     def __init__(self, models_dir: str = 'models', scalers_dir: str = 'model_scalers'):
         """Initialize the model coordinator with trained models and scalers"""
-        # Configure logging first
+        # Configure logging
         self.logger = logging.getLogger(__name__)
         
         self.model_dir = models_dir
@@ -22,25 +26,32 @@ class ModelCoordinator:
         self.models = {}
         self.scalers = {}
         self.configs = {}
+        self.last_controls = {'steer': 0.0, 'accel': 0.0, 'brake': 0.0}
+        self.control_smoothing = 0.2
+        
+        # Performance tracking
+        self.start_time = time.time()
+        self.frame_count = 0
+        self.last_report_time = time.time()
+        
+        # Output logging
+        self.log_frequency = 30  # Log every 30 frames
+        self.log_counter = 0
+        
+        # Model weights for combining predictions
+        self.model_weights = {
+            'high_level': 0.5,  # Equal weight for high-level model
+            'tactical': 0.5     # Equal weight for tactical model
+        }
+        
+        # Sequence handling
+        self.sequence_length = 10
         self.state_history = {
             'high_level': [],
-            'tactical': [],
-            'low_level': [],
-            'corner_handling': []
+            'tactical': []
         }
-        self.sequence_length = 10
-        self.last_controls = {'steer': 0.0, 'accel': 0.0, 'brake': 0.0}
-        self.control_smoothing = 0.3  # Smoothing factor for control transitions
         
-        # Model types we have
-        self.model_types = [
-            'high_level',
-            'tactical',
-            'low_level',
-            'corner_handling'
-        ]
-        
-        # Define feature groups for different models (matching data_processor.py)
+        # Pre-allocate feature arrays for all models
         self.feature_groups = {
             'high_level': [
                 'trackPos', 'racePos', 'distRaced', 'distFromStart',
@@ -53,32 +64,55 @@ class ModelCoordinator:
                 'speedX', 'speedY', 'speedZ', 'angle', 'trackPos',
                 'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
                 'track_5', 'track_6', 'track_7', 'track_8', 'track_9'
-            ],
-            'low_level': [
-                'speedX', 'speedY', 'speedZ', 'angle', 'rpm',
-                'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
-                'track_5', 'track_6', 'track_7', 'track_8', 'track_9',
-                'wheelSpinVel_0', 'wheelSpinVel_1', 'wheelSpinVel_2', 'wheelSpinVel_3'
-            ],
-            'corner_handling': [
-                'speedX', 'angle', 'trackPos',
-                'track_0', 'track_1', 'track_2', 'track_3', 'track_4',
-                'track_5', 'track_6', 'track_7', 'track_8', 'track_9'
             ]
         }
         
+        self.feature_arrays = {}
+        self.sequence_arrays = {}
+        
+        for model_type in ['high_level', 'tactical']:
+            feature_count = len(self.feature_groups[model_type])
+            self.feature_arrays[model_type] = np.zeros((1, feature_count), dtype=np.float32)
+            self.sequence_arrays[model_type] = np.zeros((1, self.sequence_length, feature_count), dtype=np.float32)
+        
         try:
-            # Load models and scalers
-            self._load_models()
-            self._load_scalers()
+            # Load both models for combined predictions
+            self._load_models(['high_level', 'tactical'])
+            self._load_scalers(['high_level', 'tactical'])
+            
+            # Create optimized prediction functions
+            @tf.function(experimental_compile=True)
+            def predict_high_level(x_input):
+                return self.models['high_level'](x_input, training=False)
+            
+            @tf.function(experimental_compile=True)
+            def predict_tactical(x_input):
+                return self.models['tactical'](x_input, training=False)
+            
+            self.predict_fns = {
+                'high_level': predict_high_level,
+                'tactical': predict_tactical
+            }
+            
+            # Pre-warm the models with dummy predictions
+            for model_type in ['high_level', 'tactical']:
+                feature_count = len(self.feature_groups[model_type])
+                dummy_input = np.zeros((1, self.sequence_length, feature_count), dtype=np.float32)
+                _ = self.predict_fns[model_type](dummy_input)
+            
+            print("MODEL COORDINATOR: Using high_level + tactical models")
+            print(f"MODEL WEIGHTS: high_level={self.model_weights['high_level']}, tactical={self.model_weights['tactical']}")
+            
+            for model_type in ['high_level', 'tactical']:
+                if model_type in self.models:
+                    print(f"{model_type.upper()} MODEL: {self.models[model_type].input_shape} → {self.models[model_type].output_shape}")
+            
         except Exception as e:
             self.logger.error(f"Error during initialization: {str(e)}")
             raise
     
-    def _load_models(self):
-        """Load all trained models"""
-        model_types = ['high_level', 'tactical', 'low_level', 'corner_handling']
-        
+    def _load_models(self, model_types):
+        """Load specified models"""
         for model_type in model_types:
             model_path = os.path.join(self.model_dir, f'{model_type}_model.keras')
             if os.path.exists(model_path):
@@ -86,19 +120,27 @@ class ModelCoordinator:
                     # Load model with custom_objects to handle optimizer
                     self.models[model_type] = keras.models.load_model(
                         model_path,
-                        custom_objects={'optimizer': tf.keras.optimizers.Adam()}
+                        custom_objects={'optimizer': tf.keras.optimizers.Adam()},
+                        compile=False  # Skip compilation for faster loading
                     )
-                    self.logger.info(f"Loaded {model_type} model from {model_path}")
+                    print(f"MODEL LOADED: {model_path}")
                 except Exception as e:
                     self.logger.error(f"Error loading {model_type} model: {str(e)}")
+                    raise
             else:
                 self.logger.warning(f"Model file not found: {model_path}")
+                print(f"WARNING: Model file not found: {model_path}")
+                # Don't raise an exception, just remove from weights
+                if model_type in self.model_weights:
+                    del self.model_weights[model_type]
     
-    def _load_scalers(self):
-        """Load all scalers"""
-        model_types = ['high_level', 'tactical', 'low_level', 'corner_handling']
-        
+    def _load_scalers(self, model_types):
+        """Load scalers for specified models"""
         for model_type in model_types:
+            # Skip if model wasn't loaded
+            if model_type not in self.models:
+                continue
+                
             feature_scaler_path = os.path.join(self.scaler_dir, f'{model_type}_feature_scaler.pkl')
             target_scaler_path = os.path.join(self.scaler_dir, f'{model_type}_target_scaler.pkl')
             
@@ -108,178 +150,211 @@ class ModelCoordinator:
                         'feature_scaler': joblib.load(feature_scaler_path),
                         'target_scaler': joblib.load(target_scaler_path)
                     }
-                    self.logger.info(f"Loaded scalers for {model_type}")
+                    print(f"SCALERS LOADED: {feature_scaler_path}")
                 except Exception as e:
                     self.logger.error(f"Error loading scalers for {model_type}: {str(e)}")
             else:
                 self.logger.warning(f"Scaler files not found for {model_type}")
     
-    def prepare_state_data(self, state_data: Dict, model_type: str) -> np.ndarray:
-        """Prepare state data for model input"""
-        features = []
+    def prepare_input(self, state_data: Dict, model_type: str) -> np.ndarray:
+        """Prepare state data for model input with sequence handling"""
+        # Skip if model wasn't loaded
+        if model_type not in self.models:
+            return None
+            
+        # Reuse pre-allocated array
+        features = self.feature_arrays[model_type][0]
         
-        # Extract features based on model type
-        for feature in self.feature_groups[model_type]:
+        # Extract features for the specified model
+        for i, feature in enumerate(self.feature_groups[model_type]):
             if feature in state_data:
                 value = state_data[feature]
                 # Handle track sensors specifically
                 if feature.startswith('track_'):
                     # Ensure track sensors are non-negative and have reasonable values
-                    value = max(0.0, min(value, 200.0))  # Track sensors typically range 0-200
-                features.append(value)
+                    value = max(0.0, min(value, 200.0))
+                features[i] = value
             else:
                 # Handle missing features
-                if feature.startswith('track_'):
-                    features.append(0.0)  # Default track sensor value
-                elif feature == 'wheelSpinVel_0':
-                    features.append(state_data.get('wheelSpinVel', 0.0))
-                else:
-                    features.append(0.0)  # Default value for other features
+                features[i] = 0.0
         
-        # Convert to numpy array and reshape for sequence
-        features = np.array(features, dtype=np.float32)
+        # Apply scaling if available
+        if model_type in self.scalers and 'feature_scaler' in self.scalers[model_type]:
+            try:
+                features_scaled = self.scalers[model_type]['feature_scaler'].transform(self.feature_arrays[model_type])[0]
+                # Copy scaled features back to our array
+                for i in range(len(features)):
+                    features[i] = features_scaled[i]
+            except Exception as e:
+                pass
         
-        # Update state history
-        self.state_history[model_type].append(features)
+        # Update state history for sequence
+        self.state_history[model_type].append(features.copy())
         if len(self.state_history[model_type]) > self.sequence_length:
             self.state_history[model_type].pop(0)
         
         # Create sequence
+        sequence = self.sequence_arrays[model_type][0]
         if len(self.state_history[model_type]) < self.sequence_length:
             # Pad with zeros if not enough history
-            padding = np.zeros((self.sequence_length - len(self.state_history[model_type]), len(features)))
-            sequence = np.vstack([padding, np.array(self.state_history[model_type])])
+            padding_length = self.sequence_length - len(self.state_history[model_type])
+            # Fill padding with zeros
+            for i in range(padding_length):
+                sequence[i].fill(0.0)
+            # Fill the rest with actual history
+            for i, hist_features in enumerate(self.state_history[model_type]):
+                sequence[padding_length + i] = hist_features
         else:
-            sequence = np.array(self.state_history[model_type])
+            # Fill with history
+            for i, hist_features in enumerate(self.state_history[model_type]):
+                sequence[i] = hist_features
         
-        # Reshape for model input: (1, sequence_length, features)
-        return sequence.reshape(1, self.sequence_length, len(features))
+        return self.sequence_arrays[model_type]
     
     def get_control_actions(self, state_data):
-        """Get control actions from all models and combine them"""
+        """Get control actions using all available models"""
+        start_time = time.time()
+        self.frame_count += 1
+        self.log_counter += 1
+        
         try:
-            # Prepare input data for each model
-            high_level_input = self.prepare_state_data(state_data, 'high_level')
-            tactical_input = self.prepare_state_data(state_data, 'tactical')
-            low_level_input = self.prepare_state_data(state_data, 'low_level')
-            corner_input = self.prepare_state_data(state_data, 'corner_handling')
+            # Prepare input data for all models
+            model_inputs = {}
+            model_predictions = {}
             
-            # Get predictions from each model
-            high_level_pred = self.models['high_level'].predict(high_level_input, verbose=0)
-            tactical_pred = self.models['tactical'].predict(tactical_input, verbose=0)
-            low_level_pred = self.models['low_level'].predict(low_level_input, verbose=0)
-            corner_pred = self.models['corner_handling'].predict(corner_input, verbose=0)
+            # Get available models (those that were successfully loaded)
+            available_models = [model_type for model_type in self.model_weights.keys() 
+                               if model_type in self.models]
             
-            # Log predictions for debugging
-            self.logger.info(f"High-level prediction shape: {high_level_pred.shape}")
-            self.logger.info(f"High-level prediction mean: {np.mean(high_level_pred):.4f}")
-            self.logger.info(f"Tactical prediction shape: {tactical_pred.shape}")
-            self.logger.info(f"Tactical prediction mean: {np.mean(tactical_pred):.4f}")
-            self.logger.info(f"Low-level prediction shape: {low_level_pred.shape}")
-            self.logger.info(f"Low-level prediction mean: {np.mean(low_level_pred):.4f}")
-            self.logger.info(f"Corner handling prediction shape: {corner_pred.shape}")
-            self.logger.info(f"Corner handling prediction mean: {np.mean(corner_pred):.4f}")
+            # Normalize weights for available models
+            total_weight = sum(self.model_weights[model_type] for model_type in available_models)
+            normalized_weights = {model_type: self.model_weights[model_type] / total_weight 
+                                for model_type in available_models}
+            
+            # Prepare inputs and get predictions for each model
+            for model_type in available_models:
+                model_inputs[model_type] = self.prepare_input(state_data, model_type)
+                if model_inputs[model_type] is not None:
+                    model_pred = self.predict_fns[model_type](model_inputs[model_type])
+                    
+                    # Convert to numpy arrays
+                    if hasattr(model_pred, 'numpy'):
+                        model_predictions[model_type] = model_pred.numpy()[0]
+                    else:
+                        model_predictions[model_type] = tf.keras.backend.get_value(model_pred)[0]
+            
+            # Extract individual control values from each model
+            model_controls = {}
+            for model_type in model_predictions:
+                steer, accel, brake = model_predictions[model_type]
+                model_controls[model_type] = {
+                    'steer': steer,
+                    'accel': accel,
+                    'brake': brake
+                }
             
             # Combine predictions with weighted average
-            weights = {
-                'high_level': 0.35,    # Increased from 0.3 due to best overall performance
-                'tactical': 0.35,      # Increased from 0.3 due to excellent performance
-                'low_level': 0.15,     # Decreased from 0.2 due to mixed performance
-                'corner_handling': 0.15 # Decreased from 0.2 due to poor brake performance
-            }
+            steer = 0.0
+            accel = 0.0
+            brake = 0.0
             
-            combined_pred = (
-                weights['high_level'] * high_level_pred +
-                weights['tactical'] * tactical_pred +
-                weights['low_level'] * low_level_pred +
-                weights['corner_handling'] * corner_pred
-            )
+            for model_type in model_controls:
+                steer += normalized_weights[model_type] * model_controls[model_type]['steer']
+                accel += normalized_weights[model_type] * model_controls[model_type]['accel']
+                brake += normalized_weights[model_type] * model_controls[model_type]['brake']
             
-            # Extract control values and scale them for more pronounced response
-            steer = float(combined_pred[0][0]) * 1.5  # Amplify steering response
-            accel = float(combined_pred[0][1])
-            brake = float(combined_pred[0][2])
+            # Log raw neural network outputs
+            if self.log_counter >= self.log_frequency:
+                print("\n===== NEURAL NETWORK OUTPUTS =====")
+                for model_type in model_controls:
+                    controls = model_controls[model_type]
+                    print(f"{model_type.upper()}: steer={controls['steer']:.4f}, accel={controls['accel']:.4f}, brake={controls['brake']:.4f}")
+                print(f"COMBINED:   steer={steer:.4f}, accel={accel:.4f}, brake={brake:.4f}")
             
-            # Get current state values
+            # Get basic state variables for logging
             speed = state_data.get('speedX', 0.0)
-            rpm = state_data.get('rpm', 0.0)
             track_pos = state_data.get('trackPos', 0.0)
-            track_sensors = [state_data.get(f'track_{i}', -1.0) for i in range(19)]
-            track_sensor_mean = np.mean(track_sensors)
             
-            # Log state for debugging
-            self.logger.info(f"Current speed: {speed:.2f}")
-            self.logger.info(f"Current RPM: {rpm:.2f}")
-            self.logger.info(f"Track position: {track_pos:.2f}")
-            self.logger.info(f"Track sensors: {track_sensors[:5]}")  # Show first 5 sensors
-            self.logger.info(f"Track sensor mean: {track_sensor_mean:.2f}")
-            
-            # Check if car is off track
-            is_off_track = abs(track_pos) > 1.0 or track_sensor_mean < 0.0
-            self.logger.info(f"Off track: {is_off_track}")
-            
-            # Adjust controls based on state
-            if is_off_track:
-                # When off track, prioritize getting back on track
-                if track_pos > 0:  # Off track to the right
-                    steer = -0.5  # Steer left
-                else:  # Off track to the left
-                    steer = 0.5   # Steer right
-                
-                # Reduce speed when off track
-                accel = 0.3
-                brake = 0.2
-            else:
-                # Normal driving adjustments
-                # Limit steering based on speed
-                max_steer = 0.5
-                if speed > 50:
-                    max_steer = 0.3
-                elif speed > 30:
-                    max_steer = 0.4
-                steer = np.clip(steer, -max_steer, max_steer)
-                
-                # Add track position correction
-                track_correction = -track_pos * 0.3  # Gentle correction towards center
-                steer = np.clip(steer + track_correction, -max_steer, max_steer)
-                
-                # Adjust acceleration based on speed and RPM
-                if speed < 5.0:  # Very slow
-                    accel = 0.5  # More aggressive acceleration
-                    brake = 0.0
-                elif speed > 100:  # Very fast
-                    accel = 0.3
-                    brake = 0.1
-                else:
-                    # More conservative brake control due to poor model performance
-                    accel = np.clip(accel, 0.0, 0.5)
-                    brake = np.clip(brake, 0.0, 0.2)  # Reduced max brake from 0.3 to 0.2
+            # Ensure acceleration is in valid range
+            accel = max(0.0, min(1.0, accel))  # Clip between 0.0 and 1.0
             
             # Apply control smoothing
-            steer = self.apply_control_smoothing(steer, 'steer')
-            accel = self.apply_control_smoothing(accel, 'accel')
-            brake = self.apply_control_smoothing(brake, 'brake')
+            steer_final = self.apply_control_smoothing(steer, 'steer')
+            accel_final = self.apply_control_smoothing(accel, 'accel')
+            brake_final = self.apply_control_smoothing(brake, 'brake')
             
-            # Log final controls
-            self.logger.info(f"Final controls: steer={steer:.4f}, accel={accel:.4f}, brake={brake:.4f}")
+            # Log detailed output parameters
+            if self.log_counter >= self.log_frequency:
+                print("\n----- Input State -----")
+                print(f"Speed: {speed:.2f}, Track Position: {track_pos:.2f}")
+                print(f"Track Sensors: {[state_data.get(f'track_{i}', -1.0) for i in range(5)]}")
+                
+                print("\n----- Processing Steps -----")
+                print(f"1. Raw NN Outputs:    (see above)")
+                print(f"2. Combined Output:   steer={steer:.4f}, accel={accel:.4f}, brake={brake:.4f}")
+                print(f"3. Final Smoothed:    steer={steer_final:.4f}, accel={accel_final:.4f}, brake={brake_final:.4f}")
+                
+                # Reset counter
+                self.log_counter = 0
+            
+            # Log performance stats occasionally
+            current_time = time.time()
+            if current_time - self.last_report_time > 10.0:  # Report every 10 seconds
+                elapsed = current_time - self.start_time
+                fps = self.frame_count / elapsed if elapsed > 0 else 0
+                frame_time = (time.time() - start_time) * 1000
+                
+                model_names = "+".join(available_models)
+                print(f"\nPERF: {frame_time:.1f}ms | FPS: {fps:.1f} | Using {model_names} models")
+                self.last_report_time = current_time
             
             return {
-                'steer': steer,
-                'accel': accel,
-                'brake': brake
+                'steer': steer_final,
+                'accel': accel_final,
+                'brake': brake_final
             }
             
         except Exception as e:
             self.logger.error(f"Error in get_control_actions: {e}")
-            # Return safe default controls
+            # Return safe default controls on error
             return {
                 'steer': 0.0,
-                'accel': 0.0,
-                'brake': 1.0
+                'accel': 0.5,
+                'brake': 0.0
             }
     
     def apply_control_smoothing(self, value, control_name):
         """Apply smoothing to prevent sudden control changes"""
-        smoothed_value = (1 - self.control_smoothing) * value + self.control_smoothing * self.last_controls[control_name]
+        # Get previous value
+        prev_value = self.last_controls[control_name]
+        
+        # Use different smoothing factors for different controls
+        if control_name == 'steer':
+            # Less smoothing for steering to be more responsive
+            smoothing_factor = 0.15
+            
+            # Add extra logic for steering to address persistent bias issues
+            # If we're turning right (negative) and have been turning right,
+            # make it easier to return to center or turn left
+            if value > prev_value and prev_value < 0:
+                # Moving from right towards center/left - reduce smoothing to allow quicker correction
+                smoothing_factor = 0.1
+            # If we're turning left (positive) and have been turning left,
+            # ensure we don't overcompensate
+            elif value < prev_value and prev_value > 0:
+                # Moving from left towards center/right - standard smoothing
+                smoothing_factor = 0.15
+            # If we're at center and trying to turn left, reduce smoothing further
+            elif value > 0 and abs(prev_value) < 0.1:
+                smoothing_factor = 0.1
+        else:
+            # Standard smoothing for acceleration and braking
+            smoothing_factor = self.control_smoothing
+            
+        # Calculate smoothed value with time-based decay
+        smoothed_value = (1 - smoothing_factor) * value + smoothing_factor * prev_value
+        
+        # Store for next iteration
         self.last_controls[control_name] = smoothed_value
+        
         return smoothed_value
