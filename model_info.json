@@ -1,0 +1,16 @@
+{
+    "input_features": 26,
+    "output_features": 3,
+    "training_samples": 136454,
+    "test_samples": 34114,
+    "batch_size": 128,
+    "epochs_trained": 100,
+    "max_epochs": 100,
+    "final_test_loss": 0.0620255172252655,
+    "final_test_mae": 0.12623420357704163,
+    "training_time_seconds": 399.73764514923096,
+    "dropout_enabled": true,
+    "optimizer": "Adam",
+    "initial_learning_rate": 0.001,
+    "timestamp": "2025-05-11 21:53:42"
+}
