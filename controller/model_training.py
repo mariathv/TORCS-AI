@@ -6,18 +6,18 @@ import os
 import matplotlib.pyplot as plt
 
 def build_and_train_model(X_train, X_test, y_train, y_test, epochs=50, batch_size=32, model_save_path='controller/model'):
-    """Build and train a model optimized for 24 features"""
+    """Build and train a model optimized for 26 features"""
     print(f"Building model for {X_train.shape[1]} input features (full feature set)")
     
-    # ----- Build neural network for full feature set -------
+    # ----- Build a neural network optimized for full feature set -------
     model = Sequential()
     model.add(Dense(128, input_dim=X_train.shape[1], activation='relu'))   # Larger first layer for more features
-    model.add(Dense(64, activation='relu'))                                # Larger hidden layer
-    model.add(Dense(32, activation='relu'))                                # Additional hidden layer
+    model.add(Dense(64, activation='relu'))                                # Medium hidden layer
+    model.add(Dense(32, activation='relu'))                                # Smaller hidden layer
     model.add(Dense(y_train.shape[1], activation='linear'))                # Output layer
     
     # ---- compile the model with slightly higher learning rate for faster convergence
-    model.compile(optimizer=Adam(learning_rate=0.001),
+    model.compile(optimizer=Adam(learning_rate=0.002),
                   loss='mse', 
                   metrics=['mae'])
     

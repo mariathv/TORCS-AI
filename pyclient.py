@@ -2,6 +2,7 @@ import sys
 import argparse
 import socket
 import driver
+import time
 
 if __name__ == '__main__':
     pass
@@ -62,7 +63,7 @@ d = driver.Driver(
     arguments.stage, 
     manual_mode=arguments.manual_mode,
     max_episodes=arguments.max_episodes,
-    model_path=arguments.model_path
+    model_coordinator=arguments.model_path
 )
 
 if arguments.manual_mode:
@@ -109,7 +110,7 @@ while not shutdownClient:
             print("Timeout waiting for server response. Skipping...")
             continue
         except socket.error as msg:
-            print("Didn't get response from server...")
+            print(f"Didn't get response from server... Socket error: {msg}")
             continue
         
         if verbose:
@@ -129,7 +130,11 @@ while not shutdownClient:
         currentStep += 1
         if currentStep != arguments.max_steps:
             if buf is not None:
+                start_drive = time.time()
                 buf = d.drive(buf)
+                drive_time = (time.time() - start_drive) * 1000
+                if drive_time > 8:
+                    print(f"[WARN] drive() took {drive_time:.2f} ms (step {currentStep})")
         else:
             buf = '(meta 1)'
         

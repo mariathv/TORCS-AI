@@ -9,16 +9,14 @@ def load_and_preprocess_data(csv_file, return_scaler=False):
     data = pd.read_csv(csv_file)
     print(f"Data shape: {data.shape}")
 
-    # --- define input (sensors) and output (actions) columns - REDUCED FEATURE SET
+    # --- define input (sensors) and output (actions) columns - FULL FEATURE SET
     input_cols = [
         'speedX', 'speedY', 'speedZ',       # Speed components (3)
         'angle', 'trackPos',                # Position on track (2)
-        'rpm', 'gear'                       # Engine state (2)
     ]
     
-    # Add more track sensors for better coverage
-    # These correspond to sensors in front, sides, and rear of the car
-    track_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]  # Full 180-degree coverage
+    # Add ALL track sensors (19 total)
+    track_indices = list(range(19))  # All 19 sensors
     
     # Try both naming conventions for track sensors
     track_cols_format1 = [f'track_{i}' for i in track_indices]  # track_0, track_1, etc.
@@ -48,7 +46,7 @@ def load_and_preprocess_data(csv_file, return_scaler=False):
     input_cols = [col for col in input_cols if col in data.columns]
     output_cols = [col for col in output_cols if col in data.columns]
 
-    print(f"Using REDUCED input columns ({len(input_cols)} features): {input_cols}")
+    print(f"Using FULL input columns ({len(input_cols)} features): {input_cols}")
     print(f"Using output columns: {output_cols}")
 
     # --- inputs and outputs
@@ -69,7 +67,7 @@ def load_and_preprocess_data(csv_file, return_scaler=False):
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    print("Preprocessing done with REDUCED feature set (12 features).")
+    print("Preprocessing done with FULL feature set (24 features).")
 
     if return_scaler:
         return X_train, X_test, y_train, y_test, scaler
